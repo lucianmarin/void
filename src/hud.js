@@ -60,14 +60,14 @@ export class HUDController {
 
   update(state) {
     const {
-      inSkyTower, sectorNum, elapsedTime,
+      inSkyTower, sectorNum, floorInfo, totalFloors, elapsedTime,
       health, maxHealth, shield, maxShield,
       katanaCooldown, katanaCooldownMax,
       isPulse, pulseMag, railMag, railReserve, reloadTimer, recoil,
       enemies, totalKills, victory, activeBoss,
       bannerText, bannerTimer, portalHint,
       hurtFlash, healPulse, portalFlash, hitMarkerTimer, hitMarkerCrit,
-      playerPos, playerYaw, portals, sectorUnlocked, bioWellPos
+      playerPos, playerYaw, portals, floorUnlocked, elevatorCenter, bioWellPos
     } = state;
 
     // 1. Fullscreen Atmospheric Vignettes
@@ -76,16 +76,18 @@ export class HUDController {
     this.fxHeal.style.opacity   = String(Math.min(0.85, healPulse * 0.75));
     this.fxPortal.style.opacity = String(Math.min(0.90, portalFlash * 0.85));
 
-    // 2. Top-Left Realm Telemetry
+    // 2. Top-Left Realm Telemetry (16 Sky Tower Floors + Underground Station)
     this.realmBadge.className = `badge-block ${inSkyTower ? 'orange' : 'emerald'}`;
-    this.realmCode.textContent = inSkyTower ? '001' : '000';
-    this.realmTitle.textContent = inSkyTower ? 'CONSTRUCT // SKY.TOWER' : 'REALITY // VOID.PLANET';
-    this.sectorTitle.style.color = inSkyTower ? '#ff6616' : '#24f5a8';
+    this.realmCode.textContent = inSkyTower ? `F${String(sectorNum).padStart(2, '0')}` : '000';
+    this.realmTitle.textContent = inSkyTower
+      ? `SKY.TOWER // FLOOR ${String(sectorNum).padStart(2, '0')} OF ${totalFloors || 16}`
+      : 'REALITY // VOID.PLANET';
+    this.sectorTitle.style.color = inSkyTower ? (floorInfo?.cssColor || '#ff6616') : '#24f5a8';
     if (!inSkyTower) {
       this.sectorTitle.textContent = 'LOC // MEGASTRUCTURE SANCTUARY';
     } else {
-      const sLabel = sectorNum === 1 ? 'SEC.01 COBALT ATRIUM' : (sectorNum === 2 ? 'SEC.02 CRIMSON CONCOURSE' : 'SEC.03 APEX SKY LOUNGE');
-      this.sectorTitle.textContent = `LOC // ${sLabel}`;
+      const fName = floorInfo ? `${floorInfo.code} ${floorInfo.name}` : `LVL.${String(sectorNum).padStart(2, '0')}`;
+      this.sectorTitle.textContent = `LOC // ${fName}`;
     }
 
     for (let i = 0; i < this.waveSpans.length; i++) {
@@ -104,13 +106,15 @@ export class HUDController {
       this.bossBox.classList.add('hidden');
       this.objBox.classList.remove('hidden');
       if (victory) {
-        this.objText.textContent = `CONSTRUCT LIBERATED // ELIMINATED: ${String(totalKills).padStart(2, '0')}`;
+        this.objText.textContent = `ALL 16 FLOORS LIBERATED // ELIMINATED: ${String(totalKills).padStart(2, '0')}`;
       } else if (!inSkyTower) {
         this.objText.textContent = health < 99.5
           ? 'SANCTUARY // STEP IN EMERALD BIO-WELL TO HEAL'
           : 'VITALS OPTIMAL // ENTER PORTAL TO RESUME COMBAT';
+      } else if (enemies.length === 0) {
+        this.objText.textContent = `LVL.${String(sectorNum).padStart(2, '0')} CLEAR // TAKE ELEVATOR [E] OR STAIRS UP \u2192 LVL.${String(Math.min(16, sectorNum + 1)).padStart(2, '0')}`;
       } else {
-        this.objText.textContent = `HOSTILES ACTIVE: ${String(enemies.length).padStart(2, '0')}   //   ELIMINATED: ${String(totalKills).padStart(2, '0')}`;
+        this.objText.textContent = `FLOOR ${String(sectorNum).padStart(2, '0')}/${totalFloors || 16}  //  HOSTILES: ${String(enemies.length).padStart(2, '0')}  //  KILLS: ${String(totalKills).padStart(2, '0')}`;
       }
     }
 
@@ -172,10 +176,10 @@ export class HUDController {
     }
 
     // 7. Tactical Radar Canvas
-    this._drawRadar(playerPos, playerYaw, inSkyTower, portals, sectorUnlocked, bioWellPos, enemies);
+    this._drawRadar(playerPos, playerYaw, inSkyTower, sectorNum, portals, floorUnlocked, elevatorCenter, bioWellPos, enemies);
   }
 
-  _drawRadar(playerPos, playerYaw, inSkyTower, portals, sectorUnlocked, bioWellPos, enemies) {
+  _drawRadar(playerPos, playerYaw, inSkyTower, sectorNum, portals, floorUnlocked, elevatorCenter, bioWellPos, enemies) {
     const ctx = this.radarCtx;
     const w = this.radarCanvas.width;
     const h = this.radarCanvas.height;
@@ -233,7 +237,8 @@ export class HUDController {
     };
 
     for (const p of portals) {
-      if (!sectorUnlocked[p.index]) continue;
+      if (!floorUnlocked?.[p.floorIndex]) continue;
+      if (inSkyTower && p.floorIndex + 1 !== sectorNum) continue;
       const wp = inSkyTower ? p.skyPos : p.voidPos;
       plot(wp.x, wp.z, p.cssColor, 11, true);
     }
@@ -241,6 +246,12 @@ export class HUDController {
     if (!inSkyTower) {
       plot(bioWellPos.x, bioWellPos.z, '#24f5a8', 13, false);
     } else {
+      // Plot North Elevator Cab & East Stairwell markers on radar
+      if (elevatorCenter) {
+        plot(elevatorCenter.x, elevatorCenter.z, '#24e0ff', 10, true);
+      }
+      plot(20.0, 8.0, '#24f5a8', 9, false);
+
       for (const e of enemies) {
         const isBoss = e.kind === ENEMY_KIND.KATANA_BOSS;
         plot(e.position.x, e.position.z, isBoss ? '#ee1824' : '#ff6616', isBoss ? 14 : 9, isBoss);

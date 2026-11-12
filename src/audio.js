@@ -153,6 +153,20 @@ export class SoundSynth {
         });
         break;
       }
+      case 'elevator': {
+        [330.0, 495.0, 660.0].forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const t0 = now + idx * 0.08;
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, t0);
+          gain.gain.setValueAtTime(0.11, t0);
+          gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(t0); osc.stop(t0 + 0.36);
+        });
+        break;
+      }
     }
   }
 

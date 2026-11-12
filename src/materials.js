@@ -140,7 +140,7 @@ export class MaterialLibrary {
 
   // Custom Sky Tower Dome Shader (Azure zenith -> White Mega City mist + Giant Crimson Sun + Construct dome lattice)
   createSkyTowerDome() {
-    const geom = new THREE.SphereGeometry(460, 48, 32);
+    const geom = new THREE.SphereGeometry(920, 48, 32);
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
