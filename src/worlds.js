@@ -356,20 +356,24 @@ export class WorldBuilder {
     const hemi = new THREE.HemisphereLight(0xd8ecff, 0x748299, 0.92);
     s.add(hemi);
 
+    // Sun shadow frustum is kept tight and re-centred on the player's floor each frame (updateSunShadow)
     const sun = new THREE.DirectionalLight(0xfffaf2, 2.35);
+    this.sunOffset = new THREE.Vector3(55, 145, 52);
     sun.position.set(55, 225, 48);
     sun.target.position.set(0, 80, -4);
     s.add(sun.target);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 340;
-    sun.shadow.camera.left = -45;
-    sun.shadow.camera.right = 45;
-    sun.shadow.camera.top = 140;
-    sun.shadow.camera.bottom = -110;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.camera.near = 20;
+    sun.shadow.camera.far = 300;
+    sun.shadow.camera.left = -32;
+    sun.shadow.camera.right = 32;
+    sun.shadow.camera.top = 32;
+    sun.shadow.camera.bottom = -32;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.02;
     s.add(sun);
+    this.skySun = sun;
 
     // Shared architectural materials
     const mWhiteTile   = this.mats.getPBR('st_white_tile', 'marble_tile', { color: PALETTE.pureWhite, roughness: 0.82, envMapIntensity: 1.45 });
@@ -873,9 +877,9 @@ export class WorldBuilder {
     const dome = this.mats.createVoidPlanetDome();
     v.add(dome);
     v.environment = this.mats.bakeEnvironmentFromDome(dome);
-    v.fog = new THREE.FogExp2(0x3b4960, 0.0040);
+    v.fog = new THREE.FogExp2(0x8297a1, 0.0040);
 
-    const hemi = new THREE.HemisphereLight(0x7c92b8, 0x181e2b, 0.75);
+    const hemi = new THREE.HemisphereLight(0x86a3b0, 0x161d24, 0.8);
     v.add(hemi);
 
     const moon = new THREE.DirectionalLight(0xaac2ee, 1.25);
@@ -986,6 +990,71 @@ export class WorldBuilder {
     this._addBox(v, null, [-5.4, 38, 128], [8.8, 78, 14], mDarkTi, { collide: false, tileMeters: 10 });
     this._addBox(v, null, [ 5.4, 38, 128], [8.8, 78, 14], mDarkTi, { collide: false, tileMeters: 10 });
     this._addBox(v, null, [ 0.0, 40, 128], [1.2, 70, 8], this.mats.getEmissive('vp_slit', PALETTE.signalCrimson, 3.6), { collide: false });
+
+    this._buildCortenDuneIsland(v, mSand);
+    this._buildGlassSlabArray(v);
+  }
+
+  // Wind-rippled dune island with leaning rusted corten monoliths (anomaly-glowing-red-monolith-14 / horizon-planetary-desert-highway)
+  _buildCortenDuneIsland(v, mSand) {
+    const cx = -50, cz = -62;
+    const geom = new THREE.PlaneGeometry(56, 44, 36, 28);
+    geom.rotateX(-Math.PI * 0.5);
+    const pos = geom.attributes.position;
+    const uv = geom.attributes.uv;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      const r = Math.hypot(x / 26, z / 20);
+      const mound = Math.max(0, 1 - r * r) ** 1.6 * 5.2;
+      const dune = Math.sin(x * 0.21 + Math.sin(z * 0.13) * 1.8) * 0.55 + Math.sin(z * 0.35 + x * 0.08) * 0.22;
+      pos.setY(i, mound + dune * Math.min(1, mound) - 1.4);
+      uv.setXY(i, (x + cx) / 5, -(z + cz) / 5);
+    }
+    geom.computeVertexNormals();
+    const island = new THREE.Mesh(geom, mSand);
+    island.position.set(cx, 0, cz);
+    island.receiveShadow = true;
+    v.add(island);
+
+    const mCorten = this.mats.getPBR('vp_corten', 'rusted_corten', { hasMetallic: true, roughness: 1.0, normalScale: 1.2 });
+    const pillars = [
+      [-4, 0, 16, 2.4, 1.1, 0.04], [0.5, -3, 22, 3.0, 1.4, -0.03], [5, 1.5, 12, 2.0, 1.0, 0.09],
+      [-9, 4, 8, 1.6, 0.9, -0.12], [9, -5, 6.5, 1.4, 1.4, 0.18], [-2, 7, 4.5, 3.6, 1.0, 0.0]
+    ];
+    for (const [px, pz, h, w, d, lean] of pillars) {
+      this._addBox(v, null, [cx + px, h * 0.5 + 1.6, cz + pz], [w, h, d], mCorten,
+        { collide: false, rot: [lean * 0.5, px * 0.07, lean], tileMeters: 3.0, castShadow: true });
+    }
+    // Thin glowing seam on the tallest monolith
+    this._addBox(v, null, [cx + 0.5, 13.2, cz - 3 + 0.71], [0.12, 19, 0.04],
+      this.mats.getEmissive('vp_corten_seam', PALETTE.signalCrimson, 3.4), { collide: false, rot: [-0.015, 0.035, -0.03] });
+  }
+
+  // Receding array of tall refractive amber & crimson glass slabs standing in the ocean (refraction-amber-glass-slab-array)
+  _buildGlassSlabArray(v) {
+    const mAmber = this.mats.getGlass('vp_slab_amber', 0xffa030, 0.38);
+    const mCrimson = this.mats.getGlass('vp_slab_crimson', 0xff2a3c, 0.34);
+    const mEdge = this.mats.getEmissive('vp_slab_edge', PALETTE.solarAmber, 2.6);
+    for (let i = 0; i < 9; i++) {
+      const t = i / 8;
+      const x = 38 + i * 6.5;
+      const z = -18 - i * 9.5;
+      const h = 9 + t * 22;
+      const mat = i % 3 === 2 ? mCrimson : mAmber;
+      this._addBox(v, null, [x, h * 0.5 - 0.8, z], [0.35, h, 7.5 + t * 4], mat, { collide: false, rot: [0, 0.42, 0] });
+      this._addBox(v, null, [x, h - 0.75, z], [0.4, 0.1, 7.6 + t * 4], mEdge, { collide: false, rot: [0, 0.42, 0] });
+    }
+  }
+
+  // Keep the Sky Tower sun's tight shadow frustum centred on the player's current floor
+  updateSunShadow(floorY, playerPos) {
+    if (!this.skySun) return;
+    const snap = 0.5;
+    const tx = Math.round(playerPos.x / snap) * snap;
+    const tz = Math.round(playerPos.z / snap) * snap;
+    this.skySun.target.position.set(tx, floorY + 4, tz);
+    this.skySun.position.set(tx + this.sunOffset.x, floorY + 4 + this.sunOffset.y, tz + this.sunOffset.z);
+    this.skySun.target.updateMatrixWorld();
   }
 
   _buildCrimsonWedgeGeometry() {

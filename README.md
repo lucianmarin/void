@@ -31,7 +31,7 @@ Fight future humanoid androids inside the computer-generated **Sky Tower** const
 | **HIR-00 White Katana Mech** | `KATANA_BOSS` | Towering `3.35m` samurai mech boss (`980 HP`) in the Apex Sky Lounge; performs high-speed katana dashes and deploys Holo-Strider escorts at 50% health. |
 
 ### Visuals, HUD & Audio
-- **Rendering Pipeline**: Three.js `WebGLRenderer` with `PCFSoftShadowMap`, `ACESFilmicToneMapping`, world-space UV box mapping with 1K PBR textures (`albedo`, `normal`, `roughness`, `metallic`), custom GLSL sky domes, and selective HDR `UnrealBloomPass`.
+- **Rendering Pipeline**: Three.js `WebGLRenderer` with `PCFSoftShadowMap` (player-following sun frustum), `ACESFilmicToneMapping`, world-space UV box mapping with seamless 1K PBR textures (JPEG `albedo`, OpenGL-convention `normal`, `roughness`, `metallic`), scanline/glitch hologram shaders, custom GLSL sky domes (procedural skyline & crimson-sun spire; banded gas giant, stars & eclipse), reflective void ocean, proximity-culled live portal preview, and selective HDR `UnrealBloomPass`.
 - **Swiss-Industrial HUD**: High-contrast telemetry overlay featuring live 45m tactical radar, dynamic reticle with hitmarkers, segmented bio-integrity readout, boss health bar, and screen-space trauma/heal/portal vignettes.
 - **Procedural Web Audio Synth**: Zero-dependency synthesized sound effects (`SoundSynth`) for pulse fire, rail blasts, katana sweeps, hitmarkers, portal warps, and sanctuary bio-healing.
 
@@ -62,8 +62,10 @@ void/
 ├── index.html          # Main entry HTML & Swiss-Industrial HUD markup
 ├── package.json        # Vite & Three.js configuration
 ├── public/
-│   └── textures/       # 1K PBR texture sets (albedo, normal, roughness, metallic)
-├── source/             # Concept art & visual reference boards (characters, HUD, worlds)
+│   └── textures/       # 1K PBR texture sets (albedo .jpg; normal, roughness, metallic .png) incl. rusted_corten
+├── inspiration/        # Concept art & visual reference boards (characters, HUD, worlds)
+├── tools/
+│   └── gen_textures.py # Procedural seamless PBR texture generator (numpy + Pillow)
 └── src/
     ├── main.js         # Core game loop, physics, raycasting, AI, and portal warping
     ├── worlds.js       # Sky Tower sectors, Void Planet sanctuary, and portal geometry
@@ -96,4 +98,18 @@ npm run build
 
 # Preview production build (http://127.0.0.1:4173)
 npm run preview
+```
+
+### Regenerating Textures
+
+Textures are generated procedurally and are deterministic (fixed seeds). Requires Python 3 and runs from the repo root:
+
+```bash
+pip install -r tools/requirements.txt
+
+# Regenerate all sets into public/textures
+python tools/gen_textures.py
+
+# Regenerate specific sets only
+python tools/gen_textures.py public/textures mech_armor void_sand
 ```
