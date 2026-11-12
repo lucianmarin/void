@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VOID</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <!-- Screen-space Trauma / Portal / Bio-Heal FX Overlay -->
+  <div id="fx-trauma"></div>
+  <div id="fx-heal"></div>
+  <div id="fx-portal"></div>
+
+  <!-- Swiss-Industrial HIR / VOID HUD (hud-00..02) -->
+  <div id="hud">
+    <!-- Top-Left Realm & Telemetry Module -->
+    <div class="hud-card tl-card">
+      <div id="realm-badge" class="badge-block orange">
+        <div class="badge-brand">VOID</div>
+        <div id="realm-code" class="badge-num">001</div>
+      </div>
+      <div class="tl-body">
+        <div id="realm-title" class="hud-title">CONSTRUCT // SKY.TOWER</div>
+        <div id="sector-title" class="hud-subtitle">LOC // SEC.01 COBALT ATRIUM</div>
+        <div class="tl-bottom-row">
+          <div id="telemetry-bars" class="waveform"></div>
+          <div class="barcode"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top-Center Objective, Banner & Boss Bar -->
+    <div class="tc-stack">
+      <div id="objective-box" class="hud-card obj-card">
+        <span id="objective-text">HOSTILES ACTIVE: 06 &nbsp;//&nbsp; ELIMINATED: 00</span>
+      </div>
+
+      <div id="boss-box" class="hud-card boss-card hidden">
+        <div class="boss-top-accent"></div>
+        <div class="boss-header">
+          <span>BOSS // HIR-00 WHITE KATANA MECH</span>
+          <span id="boss-pct" class="crimson-text">100%</span>
+        </div>
+        <div class="boss-bar-track">
+          <div id="boss-bar-fill"></div>
+        </div>
+      </div>
+
+      <div id="status-banner" class="banner-box">
+        <div class="banner-accent"></div>
+        <span id="banner-text">CONSTRUCT ONLINE // CLEAR SKY.TOWER SECTOR 01</span>
+      </div>
+    </div>
+
+    <!-- Top-Right Tactical Radar -->
+    <div class="hud-card tr-card">
+      <div class="card-strip bone">RADAR // 45M</div>
+      <canvas id="radar-canvas" width="260" height="260"></canvas>
+    </div>
+
+    <!-- Center Dynamic Reticle & Portal Threshold Prompt -->
+    <div id="reticle">
+      <div class="ret-dot"></div>
+      <div class="ret-tick top"></div>
+      <div class="ret-tick bottom"></div>
+      <div class="ret-tick left"></div>
+      <div class="ret-tick right"></div>
+      <div id="hitmarker" class="hidden">
+        <span class="hm hm-tl"></span>
+        <span class="hm hm-tr"></span>
+        <span class="hm hm-bl"></span>
+        <span class="hm hm-br"></span>
+      </div>
+    </div>
+
+    <div id="portal-prompt" class="portal-prompt hidden">
+      STEP INTO THRESHOLD &rarr; VOID.PLANET SANCTUARY
+    </div>
+
+    <!-- Bottom-Left Vitals Module -->
+    <div class="bl-wrap">
+      <div id="critical-warning" class="caution-banner hidden">
+        <span>CAUTION // ENTER PORTAL TO HEAL</span>
+        <div class="hazard-stripes"></div>
+      </div>
+
+      <div class="hud-card bl-card">
+        <div class="card-strip bone split-strip">
+          <span>001 // BIO.INTEGRITY</span>
+          <span id="katana-status" class="teal-ink">KATANA [RMB/F]: READY</span>
+        </div>
+        <div class="vitals-main">
+          <div class="hp-number-group">
+            <span id="hp-value">100</span>
+            <span class="hp-unit">HP</span>
+          </div>
+          <div class="bars-column">
+            <div id="hp-segments" class="hp-segments"></div>
+            <div class="sub-bar-row">
+              <span class="sub-label cyan-text">SHIELD</span>
+              <div class="sub-track"><div id="shield-fill" class="sub-fill cyan-bg"></div></div>
+            </div>
+            <div class="sub-bar-row">
+              <span class="sub-label emerald-text">BLADE</span>
+              <div class="sub-track thin"><div id="katana-fill" class="sub-fill emerald-bg"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom-Right Ordnance Module -->
+    <div class="hud-card br-card">
+      <div id="weapon-header" class="card-strip orange">002 // HIR-01 PULSE RIFLE</div>
+      <div class="ordnance-body">
+        <div class="ammo-block">
+          <div class="ammo-readout">
+            <span id="ammo-mag">32</span>
+            <span id="ammo-res" class="ammo-res">/ INF</span>
+          </div>
+          <div id="reload-label" class="reload-text hidden">RELOADING...</div>
+          <div id="ord-barcode" class="barcode wide"></div>
+        </div>
+        <div class="weapon-pills">
+          <div id="pill-pulse" class="wpn-pill active">[1] PULSE</div>
+          <div id="pill-rail" class="wpn-pill">[2] RAIL</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VOID Title / Pause Standby Modal -->
+  <div id="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-brand-block">
+          <span class="modal-tag">HIR.SYS // 001</span>
+          <h1>VOID</h1>
+        </div>
+        <div class="hazard-stripes dark-stripes"></div>
+      </div>
+      <p class="modal-lore">
+        Fight future humanoid androids inside the computer-generated <strong>Sky Tower</strong> construct.
+        When critically wounded, cross a glowing <strong>Threshold Portal</strong> back to real-world
+        <strong>Void Planet</strong> to heal at the Megastructure Sanctuary—then dive back into battle.
+      </p>
+      <div class="controls-grid">
+        <div><kbd>WASD</kbd> + <kbd>SHIFT</kbd> + <kbd>SPACE</kbd></div><div>Move / Sprint / Jump</div>
+        <div><kbd>LEFT CLICK</kbd></div><div>Fire Active Ordnance</div>
+        <div><kbd>RIGHT CLICK</kbd> or <kbd>F</kbd></div><div>Cyber-Katana Dash &amp; Cleave</div>
+        <div><kbd>1</kbd> / <kbd>2</kbd> or <kbd>SCROLL</kbd></div><div>Pulse Rifle / Twin-Rail Scattergun</div>
+        <div><kbd>R</kbd></div><div>Reload Magazine</div>
+        <div><kbd>PORTALS</kbd></div><div>Live Warp Sky Tower &harr; Void Planet</div>
+        <div><kbd>N</kbd> / <kbd>ESC</kbd></div><div>New Campaign Run / Pause</div>
+      </div>
+      <div class="modal-actions">
+        <button id="engage-btn" type="button">CLICK TO LOCK CURSOR &amp; ENTER VOID</button>
+        <button id="reset-btn" type="button" class="secondary-btn">NEW RUN [N]</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
