@@ -37,7 +37,7 @@ export class MaterialLibrary {
   getTexSet(prefix, hasMetallic = false) {
     if (this.texSets[prefix]) return this.texSets[prefix];
     const set = {
-      map:          this._loadTex(`/textures/${prefix}_albedo.png`, true),
+      map:          this._loadTex(`/textures/${prefix}_albedo.jpg`, true),
       normalMap:    this._loadTex(`/textures/${prefix}_normal.png`, false),
       roughnessMap: this._loadTex(`/textures/${prefix}_roughness.png`, false),
       metalnessMap: hasMetallic ? this._loadTex(`/textures/${prefix}_metallic.png`, false) : null
@@ -80,13 +80,12 @@ export class MaterialLibrary {
 
   getGlass(key, hexColor = 0x9ad4ff, opacity = 0.24) {
     if (this.matCache.has(key)) return this.matCache.get(key);
-    const mat = new THREE.MeshPhysicalMaterial({
+    const mat = new THREE.MeshStandardMaterial({
       color: hexColor,
       transparent: true,
       opacity,
-      roughness: 0.05,
+      roughness: 0.06,
       metalness: 0.15,
-      reflectivity: 1.0,
       envMapIntensity: 1.6,
       side: THREE.DoubleSide,
       depthWrite: false
@@ -95,7 +94,8 @@ export class MaterialLibrary {
     return mat;
   }
 
-  getHoloConstruct(key, hexColor) {
+  // Scanline hologram; `glitch` adds horizontal slice-tearing (glitch-coral-holo-runner-19 / phase-neon-pixel-strider-20)
+  getHoloConstruct(key, hexColor, glitch = 0.0) {
     if (this.matCache.has(key)) return this.matCache.get(key);
     const col = new THREE.Color(hexColor);
     const mat = new THREE.MeshStandardMaterial({
@@ -107,6 +107,34 @@ export class MaterialLibrary {
       roughness: 0.12,
       side: THREE.DoubleSide
     });
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.timeUniform;
+      shader.uniforms.uGlitch = { value: glitch };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>
+          uniform float uTime;
+          uniform float uGlitch;
+          varying float vHoloY;
+          float holoHash(float n) { return fract(sin(n) * 43758.5453); }`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          float hWorldY = (modelMatrix * vec4(transformed, 1.0)).y;
+          float hSlice = floor(hWorldY * 11.0);
+          float hTick = floor(uTime * 8.0);
+          float hOn = step(0.82, holoHash(hSlice * 17.13 + hTick * 3.71));
+          transformed.x += hOn * (holoHash(hSlice + hTick) - 0.5) * 0.16 * uGlitch;
+          vHoloY = hWorldY;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          uniform float uTime;
+          varying float vHoloY;`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          float hScan = 0.55 + 0.45 * step(0.45, fract(vHoloY * 38.0 - uTime * 1.6));
+          float hBand = smoothstep(0.93, 1.0, fract(vHoloY * 0.45 - uTime * 0.55));
+          diffuseColor.a *= hScan * (0.85 + hBand * 0.6);`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          totalEmissiveRadiance *= 0.75 + 0.35 * hScan + hBand * 1.6;`);
+    };
+    mat.customProgramCacheKey = () => `holo_${glitch}`;
     this.matCache.set(key, mat);
     return mat;
   }
@@ -157,6 +185,22 @@ export class MaterialLibrary {
       fragmentShader: /* glsl */`
         uniform float uTime;
         varying vec3 vDir;
+
+        float h11(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+
+        // Procedural distant skyline: returns building-top elevation (in dir.y units) for an azimuth
+        float skyline(float az, float cells, float seed, float minH, float maxH) {
+          float x = az / 6.2831853 * cells;
+          float i = floor(x);
+          float r = h11(i + seed);
+          float gap = step(0.22, h11(i * 1.7 + seed * 3.1));
+          float h = mix(minH, maxH, r * r * r) * gap;
+          // occasional needle spire on top of a tower
+          float f = fract(x);
+          float needle = step(0.93, h11(i + seed * 7.7)) * step(abs(f - 0.5), 0.07) * maxH * 0.9;
+          return max(h, needle);
+        }
+
         void main() {
           vec3 dir = normalize(vDir);
           float up = clamp(dir.y, 0.0, 1.0);
@@ -164,9 +208,11 @@ export class MaterialLibrary {
           vec3 horizon = vec3(0.92, 0.96, 1.00);
           vec3 col = mix(horizon, zenith, pow(up, 0.52));
 
-          if (dir.y < 0.06) {
-            float mist = smoothstep(0.06, -0.20, dir.y);
-            col = mix(col, vec3(0.96, 0.98, 1.0), mist * 0.95);
+          // High thin cirrus streaks
+          if (dir.y > 0.04) {
+            vec2 cuv = dir.xz / (dir.y + 0.25);
+            float cir = sin(cuv.x * 3.1 + sin(cuv.y * 1.7) * 1.6 + uTime * 0.02) * sin(cuv.y * 0.9 - cuv.x * 0.4);
+            col = mix(col, vec3(0.97, 0.98, 1.0), smoothstep(0.55, 1.0, cir) * 0.22 * smoothstep(0.04, 0.3, dir.y));
           }
 
           // Iconic Giant Crimson Sun disc (silhouette-crimson-sun-spire-04.jpg)
@@ -176,6 +222,31 @@ export class MaterialLibrary {
           float halo = pow(clamp(scos, 0.0, 1.0), 26.0) * 0.32;
           col += vec3(1.0, 0.24, 0.16) * halo;
           col = mix(col, vec3(1.55, 0.08, 0.12), disc * smoothstep(-0.06, 0.02, dir.y));
+
+          // Layered bone-white megacity silhouettes fading into horizon mist (massing-white-city-grid-02 / perspective-bonewhite-canyon-plaza-08)
+          float az = atan(dir.z, dir.x);
+          float farH  = skyline(az, 260.0, 3.0, 0.004, 0.045);
+          float nearH = skyline(az + 0.37, 140.0, 11.0, 0.002, 0.075);
+          vec3 farCol  = vec3(0.80, 0.86, 0.94);
+          vec3 nearCol = vec3(0.70, 0.76, 0.86);
+          float hz = dir.y + 0.015;
+          col = mix(col, farCol, step(hz, farH) * 0.55 * smoothstep(-0.02, 0.0, dir.y));
+          float nearMask = step(hz, nearH);
+          float facade = 0.94 + 0.06 * step(0.5, fract(dir.y * 900.0));
+          col = mix(col, nearCol * facade, nearMask * 0.75 * smoothstep(-0.02, 0.0, dir.y));
+
+          // Monumental spire silhouetted beside the crimson sun
+          float sunAz = atan(sunDir.z, sunDir.x) - 0.045;
+          float da = abs(az - sunAz);
+          float spireH = clamp(dir.y / 0.24, 0.0, 1.0);
+          float spireW = mix(0.016, 0.0012, pow(spireH, 0.7));
+          float spire = step(da, spireW) * step(dir.y, 0.24) * step(-0.02, dir.y);
+          col = mix(col, vec3(0.62, 0.66, 0.74), spire * 0.92);
+
+          if (dir.y < 0.06) {
+            float mist = smoothstep(0.06, -0.20, dir.y);
+            col = mix(col, vec3(0.96, 0.98, 1.0), mist * 0.95);
+          }
 
           // Subtle Construct dome grid
           if (dir.y > 0.16) {
@@ -242,19 +313,55 @@ export class MaterialLibrary {
         void main() {
           vec3 dir = normalize(vDir);
           float up = clamp(dir.y, 0.0, 1.0);
-          vec3 zenith = vec3(0.06, 0.09, 0.16);
-          vec3 horizon = vec3(0.28, 0.35, 0.46);
-          vec3 col = mix(horizon, zenith, pow(up, 0.65));
+          vec3 zenith = vec3(0.035, 0.05, 0.095);
+          vec3 horizon = vec3(0.22, 0.31, 0.36);
+          vec3 col = mix(horizon, zenith, pow(up, 0.55));
+
+          // Sparse star field visible through the cloud breaks
+          if (dir.y > 0.04) {
+            vec2 suv = dir.xz / (dir.y + 0.45) * 170.0;
+            vec2 cell = floor(suv);
+            float sh = hash21(cell);
+            float d = length(fract(suv) - 0.5 - (vec2(hash21(cell + 7.1), hash21(cell + 3.3)) - 0.5) * 0.6);
+            float tw = 0.65 + 0.35 * sin(uTime * (1.5 + sh * 3.0) + sh * 40.0);
+            col += vec3(0.85, 0.92, 1.0) * step(0.9965, sh) * smoothstep(0.12, 0.0, d) * tw * smoothstep(0.04, 0.4, dir.y);
+          }
+
+          // Pale banded gas giant rising on the horizon, lit as a crescent
+          vec3 gDir = normalize(vec3(0.60, 0.21, -0.77));
+          float gR = 0.20;
+          vec3 gRight = normalize(cross(vec3(0.0, 1.0, 0.0), gDir));
+          vec3 gUp = cross(gDir, gRight);
+          vec2 q = vec2(dot(dir, gRight), dot(dir, gUp)) / sin(gR);
+          float qd = length(q);
+          float gFront = step(0.0, dot(dir, gDir));
+          if (qd < 1.25 && gFront > 0.5) {
+            vec3 n = vec3(q, sqrt(max(0.0, 1.0 - qd * qd)));
+            vec3 L = normalize(vec3(-0.85, 0.30, 0.35));
+            float lit = smoothstep(-0.08, 0.55, dot(n, L));
+            float lat = q.y * 0.94 + q.x * 0.22;
+            float bands = fbm(vec2(lat * 9.0, q.x * 0.8 + uTime * 0.004)) * 0.7 + 0.3 * sin(lat * 31.0);
+            vec3 gCol = mix(vec3(0.42, 0.40, 0.42), vec3(0.88, 0.80, 0.68), smoothstep(0.25, 0.85, bands));
+            gCol = gCol * lit * 0.95 + vec3(0.35, 0.65, 0.70) * pow(1.0 - n.z, 3.0) * lit * 0.6;
+            float diskA = smoothstep(1.0, 0.985, qd);
+            col = mix(col, gCol + col * 0.18, diskA);
+            float atm = smoothstep(1.25, 1.0, qd) * (1.0 - diskA);
+            col += vec3(0.30, 0.55, 0.62) * atm * 0.22 * smoothstep(-0.3, 0.6, dot(normalize(q), normalize(L.xy)));
+          }
 
           if (dir.y > -0.04) {
             vec2 cuv = dir.xz / max(0.13, dir.y + 0.16) * 1.3 + vec2(uTime * 0.01, -uTime * 0.007);
             float c1 = fbm(cuv);
             float c2 = fbm(cuv * 2.4 - vec2(uTime * 0.014, 0.0));
-            float cloud = smoothstep(0.30, 0.82, c1 * 0.65 + c2 * 0.35);
-            col = mix(col, mix(vec3(0.11, 0.15, 0.23), vec3(0.50, 0.58, 0.70), cloud), 0.70 * smoothstep(-0.02, 0.22, dir.y));
+            float cloud = smoothstep(0.38, 0.86, c1 * 0.65 + c2 * 0.35);
+            vec3 cloudCol = mix(vec3(0.09, 0.13, 0.18), vec3(0.42, 0.52, 0.58), cloud);
+            col = mix(col, cloudCol, cloud * 0.72 * smoothstep(-0.02, 0.22, dir.y));
           } else {
-            col = mix(horizon, vec3(0.05, 0.07, 0.12), smoothstep(0.0, -0.25, dir.y));
+            col = mix(horizon, vec3(0.05, 0.07, 0.10), smoothstep(0.0, -0.25, dir.y));
           }
+
+          // Low teal mist band hugging the horizon (anomaly-glowing-red-monolith-14 / mystery-mist-triangle-artifact-15)
+          col = mix(col, vec3(0.30, 0.42, 0.46), exp(-abs(dir.y) * 16.0) * 0.55);
 
           // Twin-Planet Eclipse silhouette & amber corona (eclipse-twin-planet-pyramid-09.jpg)
           vec3 pdir = normalize(vec3(-0.32, 0.36, -0.88));
@@ -307,17 +414,35 @@ export class MaterialLibrary {
           vec2 p = vWorldPos.xz * 0.42;
           float n1 = sin(p.x * 2.9 + uTime * 1.35 + cos(p.y * 2.3 - uTime * 0.85));
           float n2 = cos(p.y * 4.5 - uTime * 1.65 + sin(p.x * 3.7 + uTime * 1.10));
-          vec3 N = normalize(vec3(n1 * 0.06, 1.0, n2 * 0.06));
-          vec3 V = normalize(cameraPosition - vWorldPos);
-          float fresnel = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 4.0);
-
-          vec3 deep = vec3(0.04, 0.06, 0.10);
-          vec3 skyRefl = vec3(0.32, 0.40, 0.54);
-          vec3 col = mix(deep, skyRefl, clamp(fresnel * 0.85 + 0.08, 0.0, 0.88));
-
+          vec2 p2 = vWorldPos.xz * 1.7;
+          float n3 = sin(p2.x * 1.3 - p2.y * 0.8 + uTime * 2.1) * cos(p2.y * 1.1 + uTime * 1.7);
+          float n4 = sin(p2.y * 1.9 + p2.x * 0.6 - uTime * 2.4);
           float dist = length(vWorldPos - cameraPosition);
+          float detail = 1.0 - smoothstep(20.0, 120.0, dist);
+          vec3 N = normalize(vec3(n1 * 0.06 + n3 * 0.035 * detail, 1.0, n2 * 0.06 + n4 * 0.035 * detail));
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
+
+          // Reflect the Void dome gradient (horizon -> zenith) so water and sky meet seamlessly
+          vec3 R = reflect(-V, N);
+          vec3 horizon = vec3(0.22, 0.31, 0.36);
+          vec3 zenith = vec3(0.035, 0.05, 0.095);
+          vec3 skyRefl = mix(horizon, zenith, pow(clamp(R.y, 0.0, 1.0), 0.55));
+          skyRefl = mix(skyRefl, vec3(0.30, 0.42, 0.46), exp(-abs(R.y) * 16.0) * 0.55);
+
+          // Glint path under the gas giant & the eclipse corona
+          vec3 gDir = normalize(vec3(0.60, 0.21, -0.77));
+          vec3 eDir = normalize(vec3(-0.32, 0.36, -0.88));
+          vec3 glintCol = vec3(0.85, 0.78, 0.66) * pow(max(dot(R, gDir), 0.0), 180.0) * 1.4
+                        + vec3(1.15, 0.68, 0.30) * pow(max(dot(R, eDir), 0.0), 300.0) * 1.8;
+
+          vec3 deep = vec3(0.018, 0.035, 0.05);
+          float sss = clamp(n1 * 0.5 + 0.5, 0.0, 1.0) * (1.0 - fresnel) * 0.05;
+          vec3 col = deep + vec3(0.05, 0.16, 0.17) * sss;
+          col = mix(col, skyRefl, clamp(fresnel, 0.0, 0.92)) + glintCol;
+
           float fog = 1.0 - exp(-pow(dist * 0.0042, 1.5));
-          col = mix(col, vec3(0.24, 0.30, 0.40), clamp(fog, 0.0, 0.94));
+          col = mix(col, horizon, clamp(fog, 0.0, 0.96));
           gl_FragColor = vec4(col, 1.0);
         }
       `

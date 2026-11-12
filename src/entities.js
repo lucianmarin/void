@@ -68,14 +68,15 @@ export class RobotEnemy {
   }
 
   _buildRig(mats) {
-    const mWhite  = mats.getPBR('bot_white', 'mech_armor', { color: PALETTE.pureWhite, hasMetallic: true, roughness: 0.85 });
+    const ceramic = { hasMetallic: true, roughness: 0.62, envMapIntensity: 1.5 };
+    const mWhite  = mats.getPBR('bot_white', 'mech_armor', { ...ceramic, color: PALETTE.pureWhite });
     const mDark   = mats.getPBR('bot_dark', 'dark_titanium', { color: 0xc2ccdc, hasMetallic: true, roughness: 0.88 });
-    const mCrim   = mats.getPBR('bot_crimson', 'mech_armor', { color: PALETTE.signalCrimson, hasMetallic: true, roughness: 0.85 });
-    const mOrange = mats.getPBR('bot_orange', 'mech_armor', { color: PALETTE.safetyOrange, hasMetallic: true, roughness: 0.85 });
+    const mCrim   = mats.getPBR('bot_crimson', 'mech_armor', { ...ceramic, color: PALETTE.signalCrimson });
+    const mOrange = mats.getPBR('bot_orange', 'mech_armor', { ...ceramic, color: PALETTE.safetyOrange });
     const mVisorO = mats.getEmissive('visor_o', PALETTE.safetyOrange, 3.6);
     const mVisorR = mats.getEmissive('visor_r', PALETTE.signalCrimson, 4.0);
     const mVisorC = mats.getEmissive('visor_c', PALETTE.holoCyan, 3.8);
-    const mHolo   = mats.getHoloConstruct('strider_holo', PALETTE.holoCoral);
+    const mHolo   = mats.getHoloConstruct('strider_holo', PALETTE.holoCoral, 1.0);
 
     const box = (x, y, z) => new THREE.BoxGeometry(x, y, z);
     const cap = (r, len) => new THREE.CapsuleGeometry(r, Math.max(0.02, len - r * 2), 6, 12);
@@ -95,7 +96,10 @@ export class RobotEnemy {
       this._addPart(this.rigRoot, sph(0.12), mWhite, [ 0.30, 0.56, 0]);
       this._addPart(this.rigRoot, cap(0.055, 0.38), mDark, [-0.31, 0.30, -0.08], [0.38, 0, 0]);
 
-      this._addPart(this.rigRoot, sph(0.145), mDark, [0, 0.89, -0.02]);
+      // White ceramic helmet with recessed dark face plate
+      this._addPart(this.rigRoot, sph(0.145), mWhite, [0, 0.89, -0.02]);
+      this._addPart(this.rigRoot, box(0.20, 0.13, 0.05), mDark, [0, 0.885, -0.13]);
+      this._addPart(this.rigRoot, box(0.035, 0.07, 0.20), mOrange, [0, 1.03, 0.0]);
       const ringGeom = new THREE.TorusGeometry(0.06, 0.016, 10, 20);
       ringGeom.rotateY(Math.PI * 0.5);
       this._addPart(this.rigRoot, ringGeom, mVisorO, [-0.135, 0.89, -0.01]);
@@ -146,6 +150,14 @@ export class RobotEnemy {
       this._addPart(this.rigRoot, box(0.05, 0.52, 0.24), mDark, [ 0.28, 0.64, 0.16], [0, 0, -0.38]);
       this._addPart(this.rigRoot, box(0.25, 0.27, 0.27), mDark, [0, 0.86, 0]);
       this._addPart(this.rigRoot, box(0.21, 0.045, 0.03), mVisorR, [0, 0.85, -0.14]);
+      // Swept-back angular helmet fins
+      this._addPart(this.rigRoot, box(0.025, 0.10, 0.30), mDark, [-0.10, 1.02, 0.08], [0.42, 0, 0.22]);
+      this._addPart(this.rigRoot, box(0.025, 0.10, 0.30), mDark, [ 0.10, 1.02, 0.08], [0.42, 0, -0.22]);
+
+      // Rear half-cloak flaring from the shoulders
+      const mCloak = mats.getPBR('bot_cloak', 'dark_titanium', { color: 0x2a303c, hasMetallic: true, roughness: 0.95 });
+      mCloak.side = THREE.DoubleSide;
+      this._addPart(this.rigRoot, new THREE.ConeGeometry(0.42, 0.92, 10, 1, true, -Math.PI * 0.5, Math.PI), mCloak, [0, 0.26, 0.04]);
 
       for (const leg of [this.leftLeg, this.rightLeg]) {
         this._addPart(leg, cap(0.068, 0.88), mDark, [0, -0.45, 0]);
@@ -178,6 +190,8 @@ export class RobotEnemy {
       this._addPart(this.rigRoot, box(0.26, 0.06, 0.04), mVisorR, [0, 1.30, -0.23]);
       this._addPart(this.rigRoot, box(0.04, 0.24, 0.08), mWhite, [-0.18, 1.46, -0.12], [0, 0, 0.45]);
       this._addPart(this.rigRoot, box(0.04, 0.24, 0.08), mWhite, [ 0.18, 1.46, -0.12], [0, 0, -0.45]);
+      // Glowing crimson halo ring behind the head
+      this._addPart(this.rigRoot, new THREE.TorusGeometry(0.36, 0.022, 8, 48), mVisorR, [0, 1.36, 0.24]);
 
       // Twin Crossed Katanas on Back
       this._addPart(this.rigRoot, box(0.06, 1.05, 0.08), mDark, [ 0.26, 1.30, 0.35], [0, 0, -0.32]);
@@ -254,10 +268,11 @@ export class WeaponRig {
     this.pivot = new THREE.Group();
     this.scene.add(this.pivot);
 
-    const mWhite  = mats.getPBR('wpn_white', 'mech_armor', { color: PALETTE.pureWhite, hasMetallic: true, roughness: 0.80 });
+    const ceramic = { hasMetallic: true, roughness: 0.58, envMapIntensity: 1.55 };
+    const mWhite  = mats.getPBR('wpn_white', 'mech_armor', { ...ceramic, color: PALETTE.pureWhite });
     const mDark   = mats.getPBR('wpn_dark', 'dark_titanium', { color: 0xd0daea, hasMetallic: true, roughness: 0.84 });
-    const mOrange = mats.getPBR('wpn_orange', 'mech_armor', { color: PALETTE.safetyOrange, hasMetallic: true, roughness: 0.82 });
-    const mCobalt = mats.getPBR('wpn_cobalt', 'mech_armor', { color: PALETTE.cobaltBlue, hasMetallic: true, roughness: 0.82 });
+    const mOrange = mats.getPBR('wpn_orange', 'mech_armor', { ...ceramic, color: PALETTE.safetyOrange });
+    const mCobalt = mats.getPBR('wpn_cobalt', 'mech_armor', { ...ceramic, color: PALETTE.cobaltBlue });
     const mCyanE  = mats.getEmissive('wpn_cyan_e', PALETTE.holoCyan, 3.2);
     const mOrgE   = mats.getEmissive('wpn_org_e', PALETTE.safetyOrange, 3.2);
 

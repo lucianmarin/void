@@ -28,13 +28,13 @@ class VoidGame {
     this.renderer.autoClear = false;
     this.container.appendChild(this.renderer.domElement);
 
-    // Live See-Through Portal RenderTarget (512x768)
-    this.portalRT = new THREE.WebGLRenderTarget(512, 768, {
+    // Live See-Through Portal RenderTarget (384x576)
+    this.portalRT = new THREE.WebGLRenderTarget(384, 576, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       type: THREE.HalfFloatType
     });
-    this.portalCamera = new THREE.PerspectiveCamera(75, 512 / 768, 0.1, 860);
+    this.portalCamera = new THREE.PerspectiveCamera(75, 384 / 576, 0.1, 860);
     this.portalCamera.rotation.order = 'YXZ';
 
     // Main FPS Camera
@@ -1266,14 +1266,16 @@ class VoidGame {
 
   // --- Live See-Through Portal Render Pass ---
   _renderPortalPreview() {
-    let bestP = this.worlds.portals[0];
+    let bestP = null;
     let bestD = Infinity;
     for (const p of this.worlds.portals) {
       if (!this.floorUnlocked[p.floorIndex]) continue;
       const src = this.inSkyTower ? p.skyPos : p.voidPos;
+      if (this.inSkyTower && Math.abs(this.playerPos.y - src.y) > FLOOR_HEIGHT * 1.25) continue;
       const d = this.playerPos.distanceTo(src);
       if (d < bestD) { bestD = d; bestP = p; }
     }
+    if (!bestP || bestD > 28) return;
 
     const srcPos = this.inSkyTower ? bestP.skyPos : bestP.voidPos;
     const dstPos = this.inSkyTower ? bestP.voidPos : bestP.skyPos;
@@ -1387,6 +1389,7 @@ class VoidGame {
       paused: !this.isLocked
     });
 
+    if (this.inSkyTower) this.worlds.updateSunShadow(this.getFloorIndex() * FLOOR_HEIGHT, this.playerPos);
     this._renderPortalPreview();
     this.composer.render();
 
