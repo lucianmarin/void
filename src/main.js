@@ -16,6 +16,7 @@ class VoidGame {
     this.modalOverlay = document.getElementById('modal-overlay');
     this.engageBtn = document.getElementById('engage-btn');
     this.resetBtn = document.getElementById('reset-btn');
+    this.touchWarning = document.getElementById('touch-warning');
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -254,9 +255,38 @@ class VoidGame {
       this.composer.setSize(w, h);
     });
 
+    const showTouchWarning = () => {
+      this.touchWarning?.classList.remove('hidden');
+    };
+
+    const isTouchDevice =
+      window.matchMedia?.('(pointer: coarse)').matches ||
+      window.matchMedia?.('(hover: none)').matches ||
+      navigator.maxTouchPoints > 0 ||
+      'ontouchstart' in window;
+
+    if (isTouchDevice) {
+      showTouchWarning();
+    }
+
+    window.addEventListener('touchstart', () => {
+      showTouchWarning();
+    }, { passive: true });
+
     const requestLock = () => {
       this.audio.ensureContext();
-      this.renderer.domElement.requestPointerLock?.();
+      if (!this.renderer.domElement.requestPointerLock) {
+        showTouchWarning();
+        return;
+      }
+      try {
+        const lockPromise = this.renderer.domElement.requestPointerLock();
+        if (lockPromise && typeof lockPromise.catch === 'function') {
+          lockPromise.catch(() => showTouchWarning());
+        }
+      } catch {
+        showTouchWarning();
+      }
     };
 
     this.engageBtn.addEventListener('click', requestLock);

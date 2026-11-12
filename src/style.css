@@ -516,7 +516,9 @@ html, body {
 }
 
 .modal-card {
-  width: 580px;
+  width: min(580px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
   background: rgba(11, 13, 19, 0.96);
   border: 2px solid #ff6616;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75);
@@ -555,6 +557,38 @@ html, body {
 }
 .modal-lore strong {
   color: #ffffff;
+}
+
+.touch-warning {
+  margin: 6px 22px 10px;
+  background: rgba(238, 24, 36, 0.14);
+  border: 1.5px solid #ee1824;
+  border-left: 6px solid #ee1824;
+  padding: 10px 14px;
+}
+
+.touch-warning-badge {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: #ff6616;
+  margin-bottom: 4px;
+}
+
+.touch-warning-text {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #f0f4f8;
+}
+
+.touch-warning-text strong {
+  color: #24e0ff;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .touch-warning {
+    display: block !important;
+  }
 }
 
 .controls-grid {
