@@ -338,6 +338,11 @@ class VoidGame {
         this.resetCampaign();
         return;
       }
+      if (e.code === 'KeyM' && !e.repeat) {
+        const muted = this.audio.toggleMute();
+        this.showBanner(muted ? 'AUDIO // SOUNDTRACK MUTED [M]' : 'AUDIO // SOUNDTRACK ACTIVE [M]', 2.4);
+        return;
+      }
       if (!this.isLocked) return;
       this.keys.add(e.code);
 
@@ -1302,9 +1307,15 @@ class VoidGame {
     }
     this.worlds.vtols.forEach((v, idx) => {
       const ph = t * 0.24 + idx * Math.PI;
-      const rad = 56 + idx * 16;
-      v.position.set(Math.sin(ph) * rad, 45 + idx * 45 + Math.sin(ph * 2) * 4, -62 + Math.cos(ph) * 68);
-      v.rotation.set(0, Math.atan2(-Math.cos(ph) * rad, Math.sin(ph) * 68), 0.16);
+      const rx = 92 + idx * 24;
+      const rz = 56 + idx * 14;
+      const centerZ = -112 - idx * 28;
+      v.position.set(
+        Math.sin(ph) * rx,
+        45 + idx * 65 + Math.sin(ph * 2) * 4,
+        centerZ + Math.cos(ph) * rz
+      );
+      v.rotation.set(0, Math.atan2(-Math.cos(ph) * rx, Math.sin(ph) * rz), 0.16);
     });
   }
 
@@ -1366,6 +1377,15 @@ class VoidGame {
 
     const curFloorNum = this.getSectorNumber();
     const floorEnemies = this.enemies.filter((e) => e.sector === curFloorNum);
+    const activeBoss = floorEnemies.find((e) => e.kind === ENEMY_KIND.KATANA_BOSS) || null;
+
+    this.audio.updateMusic({
+      inSkyTower: this.inSkyTower,
+      combatCount: floorEnemies.length,
+      bossActive: Boolean(activeBoss),
+      lowHealth: this.inSkyTower && this.health <= 38,
+      paused: !this.isLocked
+    });
 
     this._renderPortalPreview();
     this.composer.render();
@@ -1391,7 +1411,7 @@ class VoidGame {
       enemies: floorEnemies,
       totalKills: this.totalKills,
       victory: this.victory,
-      activeBoss: floorEnemies.find((e) => e.kind === ENEMY_KIND.KATANA_BOSS) || null,
+      activeBoss,
       bannerText: this.bannerText,
       bannerTimer: this.bannerTimer,
       portalHint: this.portalHint,
