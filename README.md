@@ -1,5 +1,7 @@
 # VOID
 
+![screenshot](screenshot.jpg)
+
 **HIR.SYS // 001** — A first-person cyberpunk tactical shooter built with **Three.js** and **Vite**.
 
 Fight future humanoid androids inside the computer-generated **Sky Tower** construct. When critically wounded, cross a live see-through **Threshold Portal** back to the real-world **Void Planet** Megastructure Sanctuary to restore bio-integrity and ordnance—then dive back into battle.
