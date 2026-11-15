@@ -1,14 +1,30 @@
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import { SoundSynth } from './audio.js';
 import { MaterialLibrary, PALETTE } from './materials.js';
 import { WorldBuilder, FLOOR_HEIGHT, TOTAL_FLOORS, SKYTOWER_FLOORS } from './worlds.js';
 import { RobotEnemy, WeaponRig, ENEMY_KIND } from './entities.js';
 import { HUDController } from './hud.js';
+import { PostFXPipeline } from './postfx.js';
+
+const FLOOR_ATMOS = {
+  underground_station: { fogHex: 0x263848, fogDensity: 0.0080, indoor: true,  rayDensity: 0.30, rayRGB: [0.58, 0.84, 1.00] },
+  rail_depot:          { fogHex: 0x483c32, fogDensity: 0.0062, indoor: true,  rayDensity: 0.32, rayRGB: [1.00, 0.80, 0.56] },
+  vault_train_hub:     { fogHex: 0x30423c, fogDensity: 0.0062, indoor: true,  rayDensity: 0.30, rayRGB: [0.56, 0.96, 0.80] },
+  cobalt_metro:        { fogHex: 0x82a8e8, fogDensity: 0.0024, indoor: false, rayDensity: 0.28, rayRGB: [0.68, 0.86, 1.00] },
+  shuttle_cabin:       { fogHex: 0xe4d4c8, fogDensity: 0.0020, indoor: false, rayDensity: 0.28, rayRGB: [1.00, 0.86, 0.72] },
+  mezzanine_terminal:  { fogHex: 0xebd8b8, fogDensity: 0.0024, indoor: false, rayDensity: 0.34, rayRGB: [1.00, 0.86, 0.60] },
+  modular_corridor:    { fogHex: 0x4a6678, fogDensity: 0.0052, indoor: true,  rayDensity: 0.28, rayRGB: [0.66, 0.92, 1.00] },
+  split_hallway:       { fogHex: 0xc2dfd4, fogDensity: 0.0024, indoor: false, rayDensity: 0.40, rayRGB: [0.84, 0.98, 0.88] },
+  crimson_corridor:    { fogHex: 0x4a1d24, fogDensity: 0.0058, indoor: true,  rayDensity: 0.30, rayRGB: [1.00, 0.46, 0.48] },
+  curved_concourse:    { fogHex: 0xe4d2c4, fogDensity: 0.0020, indoor: false, rayDensity: 0.28, rayRGB: [1.00, 0.84, 0.68] },
+  cobalt_atrium:       { fogHex: 0x9abcf0, fogDensity: 0.0024, indoor: false, rayDensity: 0.30, rayRGB: [0.76, 0.90, 1.00] },
+  skybridge_corridor:  { fogHex: 0xe6d6c8, fogDensity: 0.0020, indoor: false, rayDensity: 0.30, rayRGB: [1.00, 0.86, 0.70] },
+  observation_tunnel:  { fogHex: 0xc6e2f4, fogDensity: 0.0020, indoor: false, rayDensity: 0.30, rayRGB: [0.82, 0.95, 1.00] },
+  magenta_gallery:     { fogHex: 0xe2ccd8, fogDensity: 0.0024, indoor: false, rayDensity: 0.30, rayRGB: [1.00, 0.78, 0.90] },
+  amber_canopy:        { fogHex: 0xeddab8, fogDensity: 0.0024, indoor: false, rayDensity: 0.38, rayRGB: [1.00, 0.84, 0.58] },
+  panoramic_sky_lounge:{ fogHex: 0xdce8f8, fogDensity: 0.0017, indoor: false, rayDensity: 0.32, rayRGB: [1.00, 0.88, 0.72] }
+};
 
 class VoidGame {
   constructor() {
@@ -18,23 +34,30 @@ class VoidGame {
     this.resetBtn = document.getElementById('reset-btn');
     this.touchWarning = document.getElementById('touch-warning');
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.98;
+    this.renderer.toneMapping = THREE.NoToneMapping; // Handled in PostFXPipeline ACES + IGN dither pass
     this.renderer.autoClear = false;
     this.container.appendChild(this.renderer.domElement);
 
-    // Live See-Through Portal RenderTarget (384x576)
-    this.portalRT = new THREE.WebGLRenderTarget(384, 576, {
+    // Live See-Through Portal RenderTargets (512x768 for Sky Tower, 320x480 per-portal on Void Planet)
+    this.portalRT = new THREE.WebGLRenderTarget(512, 768, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       type: THREE.HalfFloatType
     });
-    this.portalCamera = new THREE.PerspectiveCamera(75, 384 / 576, 0.1, 860);
+    this.voidPortalRTs = Array.from({ length: 5 }, () => new THREE.WebGLRenderTarget(320, 480, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      type: THREE.HalfFloatType
+    }));
+    this._voidPortalCursor = 0;
+    this._voidPortalDirty = true;
+    this._lastRealmSky = true;
+    this.portalCamera = new THREE.PerspectiveCamera(75, 512 / 768, 0.1, 860);
     this.portalCamera.rotation.order = 'YXZ';
 
     // Main FPS Camera
@@ -43,32 +66,19 @@ class VoidGame {
 
     this.audio = new SoundSynth();
     this.mats  = new MaterialLibrary(this.renderer);
-    this.worlds = new WorldBuilder(this.mats, this.portalRT.texture);
+    this.worlds = new WorldBuilder(this.mats, this.portalRT.texture, this.voidPortalRTs.map((rt) => rt.texture));
     this.weaponRig = new WeaponRig(this.mats);
     this.hud = new HUDController();
 
-    // Post-Processing Composer (World -> 3D Weapon Viewmodel -> Selective HDR Bloom -> ACES Output)
-    this.composer = new EffectComposer(this.renderer);
-    this.worldPass = new RenderPass(this.worlds.skyScene, this.camera);
-    this.weaponPass = new RenderPass(this.weaponRig.scene, this.weaponRig.camera);
-    this.weaponPass.clear = false;
-    this.weaponPass.clearDepth = true;
-    this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.30, // subtle realistic HDR bloom strength
-      0.42, // radius
-      1.08  // threshold above diffuse white so only emissive optics/portals/lasers bloom!
-    );
-    this.outputPass = new OutputPass();
+    // 4x MSAA HDR + GTAO + Volumetric God Rays + Karis Multi-Mip Bloom + ACES/Dither Pipeline
+    this.postfx = new PostFXPipeline(this.renderer, window.innerWidth, window.innerHeight);
 
-    this.composer.addPass(this.worldPass);
-    this.composer.addPass(this.weaponPass);
-    this.composer.addPass(this.bloomPass);
-    this.composer.addPass(this.outputPass);
-
-    // Shared projectile & spark geometries
-    this.boltGeom = new THREE.BoxGeometry(0.08, 0.08, 0.72);
-    this.sparkGeom = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+    // Shared sleek projectile & directional spark geometries
+    this.boltGeom = new THREE.CylinderGeometry(0.022, 0.042, 0.88, 8);
+    this.boltGeom.rotateX(Math.PI * 0.5);
+    this.sparkGeom = new THREE.BoxGeometry(0.024, 0.024, 0.34);
+    this._rayColorVec = new THREE.Vector3();
+    this._tmpVecA = new THREE.Vector3();
 
     // Input state
     this.keys = new Set();
@@ -145,7 +155,6 @@ class VoidGame {
     this._clearTransientFX();
 
     this.inSkyTower = true;
-    this.worldPass.scene = this.worlds.skyScene;
 
     // 16 Floor Levels: Level 01 (index 0) is the Underground Station connected to the Sky Tower
     this.floorUnlocked = new Array(TOTAL_FLOORS).fill(false);
@@ -219,7 +228,7 @@ class VoidGame {
     this.katanaDashDir = new THREE.Vector3(0, 0, -1);
 
     this.portalCooldown = 1.0;
-    this.portalFlash = 0.65;
+    this.portalFlash = 0.0;
     this.hurtFlash = 0;
     this.healPulse = 0;
     this.hitMarkerTimer = 0;
@@ -252,7 +261,7 @@ class VoidGame {
       this.camera.updateProjectionMatrix();
       this.weaponRig.setAspect(w / h);
       this.renderer.setSize(w, h);
-      this.composer.setSize(w, h);
+      this.postfx.setSize(w, h);
     });
 
     const showTouchWarning = () => {
@@ -509,6 +518,8 @@ class VoidGame {
   // --- Wave Spawning across all 16 Sky Tower Floors ---
   _spawnEnemy(kind, floorNum, x, y, z) {
     const bot = new RobotEnemy(kind, floorNum, new THREE.Vector3(x, y, z), this.mats);
+    bot.yaw = Math.atan2(-(0 - x), -(12 - z));
+    bot.updateVisuals(0, 0);
     this.worlds.skyScene.add(bot.group);
     this.enemies.push(bot);
   }
@@ -522,20 +533,20 @@ class VoidGame {
     const info = SKYTOWER_FLOORS[fIdx];
 
     if (fIdx === 0) {
-      // Level 01: Underground Station — Introductory android patrol
-      this._spawnEnemy(ENEMY_KIND.OPTIC_ANDROID, floorNum, -5.5, y0, -2.0);
-      this._spawnEnemy(ENEMY_KIND.OPTIC_ANDROID, floorNum,  5.5, y0, -4.5);
-      this._spawnEnemy(ENEMY_KIND.HOLO_STRIDER,  floorNum,  0.0, y0, -10.5);
+      // Level 01: Underground Station — Introductory mixed patrol
+      this._spawnEnemy(ENEMY_KIND.OPTIC_ANDROID, floorNum, -3.2, y0,  0.8);
+      this._spawnEnemy(ENEMY_KIND.HOLO_STRIDER,  floorNum,  2.8, y0, -0.5);
+      this._spawnEnemy(ENEMY_KIND.OPTIC_ANDROID, floorNum,  4.8, y0, -5.8);
       return;
     }
 
     if (fIdx === TOTAL_FLOORS - 1) {
       // Level 16: Panoramic Sky Lounge — Final Boss Arena
-      this._spawnEnemy(ENEMY_KIND.KATANA_BOSS,      floorNum,   0.0, y0, -8.5);
+      this._spawnEnemy(ENEMY_KIND.KATANA_BOSS,      floorNum,   1.4, y0,  0.6);
       this._spawnEnemy(ENEMY_KIND.OPTIC_ANDROID,    floorNum, -11.0, y0, -3.5);
       this._spawnEnemy(ENEMY_KIND.OPTIC_ANDROID,    floorNum,  11.0, y0, -3.5);
-      this._spawnEnemy(ENEMY_KIND.HOLO_STRIDER,     floorNum,  -6.5, y0, -12.0);
-      this._spawnEnemy(ENEMY_KIND.HOLO_STRIDER,     floorNum,   6.5, y0, -12.0);
+      this._spawnEnemy(ENEMY_KIND.HOLO_STRIDER,     floorNum,  -9.0, y0,  -5.0);
+      this._spawnEnemy(ENEMY_KIND.HOLO_STRIDER,     floorNum,   9.0, y0,  -5.0);
       this.showBanner('WARNING // HIR-00 WHITE KATANA MECH ENGAGED ON LVL.16 APEX LOUNGE!', 5.5);
       return;
     }
@@ -556,13 +567,13 @@ class VoidGame {
       let sy = y0;
       let ex = sx;
       let ez = sz;
-      // Place Stalker snipers on elevated mezzanines on floors 6 & 8
+      // Place Stalker snipers & tactical patrols cleanly grounded on solid floors/mezzanines
       if (info.theme === 'mezzanine_terminal' && i === count - 1) {
         ex = -12.5; sy = y0 + 2.8; ez = -3.0;
         kind = ENEMY_KIND.OBSIDIAN_STALKER;
-      } else if (info.theme === 'split_hallway' && i === count - 1) {
-        ex = 5.5; sy = y0 + 2.8; ez = -3.0;
-        kind = ENEMY_KIND.OBSIDIAN_STALKER;
+      } else if (info.theme === 'split_hallway') {
+        if (i === 0) { ex = -3.4; ez = -1.8; }
+        else if (i === count - 1) { ex = 0.6; sy = y0; ez = -3.8; kind = ENEMY_KIND.OPTIC_ANDROID; }
       }
 
       this._spawnEnemy(kind, floorNum, ex, sy, ez);
@@ -932,7 +943,6 @@ class VoidGame {
 
     if (this.inSkyTower) {
       this.inSkyTower = false;
-      this.worldPass.scene = this.worlds.voidScene;
       this.playerPos.copy(p.voidSpawn);
       const toWell = this.worlds.bioWellPos.clone().sub(this.playerPos);
       this.playerYaw = Math.atan2(-toWell.x, -toWell.z);
@@ -940,7 +950,6 @@ class VoidGame {
       this.showBanner('REALITY // VOID.PLANET — STEP IN EMERALD BIO-WELL TO HEAL', 5.0);
     } else {
       this.inSkyTower = true;
-      this.worldPass.scene = this.worlds.skyScene;
       this.playerPos.copy(p.skySpawn);
       this.playerYaw = 0;
       this.playerPitch = 0;
@@ -1230,14 +1239,16 @@ class VoidGame {
   _spawnSparks(pos, hexCol, count) {
     if (this.sparks.length > 160) return;
     const scene = this.inSkyTower ? this.worlds.skyScene : this.worlds.voidScene;
-    const mat = this.mats.getEmissive(`spark_${hexCol}`, hexCol, 3.4);
+    const mat = this.mats.getEmissive(`spark_${hexCol}`, hexCol, 4.2);
     for (let i = 0; i < count; i++) {
       const mesh = new THREE.Mesh(this.sparkGeom, mat);
       mesh.position.copy(pos);
-      scene.add(mesh);
       const vel = new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 1.4, (Math.random() - 0.5) * 2)
         .normalize()
-        .multiplyScalar(3.5 + Math.random() * 6.0);
+        .multiplyScalar(4.0 + Math.random() * 7.5);
+      this._tmpVecA.copy(pos).add(vel);
+      mesh.lookAt(this._tmpVecA);
+      scene.add(mesh);
       this.sparks.push({ mesh, scene, vel, life: 0.16 + Math.random() * 0.22 });
     }
   }
@@ -1253,7 +1264,10 @@ class VoidGame {
       }
       sp.vel.y -= 14.0 * dt;
       sp.mesh.position.addScaledVector(sp.vel, dt);
-      sp.mesh.scale.setScalar(Math.max(0.1, sp.life * 3.2));
+      this._tmpVecA.copy(sp.mesh.position).add(sp.vel);
+      sp.mesh.lookAt(this._tmpVecA);
+      const s = Math.max(0.15, sp.life * 4.0);
+      sp.mesh.scale.set(s * 0.6, s * 0.6, Math.min(1.6, s * 1.3));
     }
   }
 
@@ -1265,36 +1279,97 @@ class VoidGame {
   }
 
   // --- Live See-Through Portal Render Pass ---
-  _renderPortalPreview() {
-    let bestP = null;
-    let bestD = Infinity;
-    for (const p of this.worlds.portals) {
-      if (!this.floorUnlocked[p.floorIndex]) continue;
-      const src = this.inSkyTower ? p.skyPos : p.voidPos;
-      if (this.inSkyTower && Math.abs(this.playerPos.y - src.y) > FLOOR_HEIGHT * 1.25) continue;
-      const d = this.playerPos.distanceTo(src);
-      if (d < bestD) { bestD = d; bestP = p; }
+  _renderSinglePortal(p, targetRT) {
+    const srcPos = this.inSkyTower ? p.skyPos : p.voidPos;
+    const dstPos = this.inSkyTower ? p.voidPos : p.skyPos;
+    const srcFront = this.inSkyTower ? p.skySpawn : p.voidSpawn;
+    const dstFront = this.inSkyTower ? p.voidSpawn : p.skySpawn;
+
+    const srcFrontYaw = Math.atan2(-(srcFront.x - srcPos.x), -(srcFront.z - srcPos.z));
+    const dstFrontYaw = Math.atan2(-(dstFront.x - dstPos.x), -(dstFront.z - dstPos.z));
+    const yawDiff = dstFrontYaw - (srcFrontYaw + Math.PI);
+
+    const outDir = new THREE.Vector3(dstFront.x - dstPos.x, 0, dstFront.z - dstPos.z).normalize();
+    this.portalCamera.position.copy(dstPos).add(new THREE.Vector3(0, 1.75, 0)).addScaledVector(outDir, 0.8);
+
+    if (this.inSkyTower) {
+      // Aim cleanly toward the elevated Emerald Bio-Well & Void Sanctuary horizon with gentle player parallax
+      const wellFocus = this.worlds.bioWellPos.clone().add(new THREE.Vector3(0, 2.2, 0));
+      const toWell = wellFocus.sub(this.portalCamera.position);
+      const wellYaw = Math.atan2(-toWell.x, -toWell.z);
+      const wellPitch = Math.atan2(toWell.y, Math.hypot(toWell.x, toWell.z));
+      const relYaw = Math.atan2(Math.sin(this.playerYaw + yawDiff - wellYaw), Math.cos(this.playerYaw + yawDiff - wellYaw));
+      this.portalCamera.rotation.set(wellPitch + this.playerPitch * 0.35, wellYaw + relYaw * 0.32, 0);
+    } else {
+      // Aim inward toward the center of the destination Sky Tower floor so all 5 portals show distinct levels
+      const floorFocus = new THREE.Vector3(0, p.floorIndex * FLOOR_HEIGHT + 2.2, -3.5);
+      const toFloor = floorFocus.sub(this.portalCamera.position);
+      const floorYaw = Math.atan2(-toFloor.x, -toFloor.z);
+      const floorPitch = Math.atan2(toFloor.y, Math.hypot(toFloor.x, toFloor.z));
+      const relYaw = Math.atan2(Math.sin(this.playerYaw + yawDiff - floorYaw), Math.cos(this.playerYaw + yawDiff - floorYaw));
+      this.portalCamera.rotation.set(floorPitch + this.playerPitch * 0.35, floorYaw + relYaw * 0.30, 0);
     }
-    if (!bestP || bestD > 28) return;
-
-    const srcPos = this.inSkyTower ? bestP.skyPos : bestP.voidPos;
-    const dstPos = this.inSkyTower ? bestP.voidPos : bestP.skyPos;
-    const srcYaw = this.inSkyTower ? bestP.skyYaw : bestP.voidYaw;
-    const dstYaw = this.inSkyTower ? bestP.voidYaw : bestP.skyYaw;
-
-    const yawDiff = dstYaw - srcYaw + Math.PI;
-    const rel = this.camera.position.clone().sub(srcPos.clone().add(new THREE.Vector3(0, 1.7, 0)));
-    rel.applyAxisAngle(new THREE.Vector3(0, 1, 0), yawDiff);
-    if (rel.length() > 8) rel.setLength(8);
-
-    this.portalCamera.position.copy(dstPos).add(new THREE.Vector3(0, 1.7, 0)).add(rel);
-    this.portalCamera.rotation.set(this.playerPitch, this.playerYaw + yawDiff, 0);
 
     const destScene = this.inSkyTower ? this.worlds.voidScene : this.worlds.skyScene;
-    this.renderer.setRenderTarget(this.portalRT);
+    const dstArch = this.inSkyTower ? p.voidGroup : p.skyGroup;
+    if (dstArch) dstArch.visible = false;
+    if (!this.inSkyTower) {
+      this.worlds.setVisibleFloors(p.floorIndex);
+      this.worlds.updateSunShadow(p.floorIndex * FLOOR_HEIGHT, p.skyPos);
+      const pTheme = SKYTOWER_FLOORS[p.floorIndex]?.theme;
+      const pa = FLOOR_ATMOS[pTheme];
+      if (pa && this.worlds.skyScene.fog) {
+        this.worlds.skyScene.fog.color.setHex(pa.fogHex);
+        this.worlds.skyScene.fog.density = pa.fogDensity;
+      }
+    }
+    this.renderer.setRenderTarget(targetRT);
     this.renderer.clear();
     this.renderer.render(destScene, this.portalCamera);
     this.renderer.setRenderTarget(null);
+    if (dstArch) dstArch.visible = true;
+  }
+
+  _renderPortalPreview() {
+    if (this._lastRealmSky !== this.inSkyTower) {
+      this._lastRealmSky = this.inSkyTower;
+      if (!this.inSkyTower) this._voidPortalDirty = true;
+    }
+
+    if (this.inSkyTower) {
+      let bestP = null;
+      let bestD = Infinity;
+      for (const p of this.worlds.portals) {
+        if (!this.floorUnlocked[p.floorIndex]) continue;
+        if (Math.abs(this.playerPos.y - p.skyPos.y) > FLOOR_HEIGHT * 1.25) continue;
+        const d = this.playerPos.distanceTo(p.skyPos);
+        if (d < bestD) { bestD = d; bestP = p; }
+      }
+      if (!bestP || bestD > 55) return;
+      this._renderSinglePortal(bestP, this.portalRT);
+      return;
+    }
+
+    // Void Planet: warm all 5 distinct portal previews on entry, then refresh 1 portal per frame (closest every other frame)
+    if (this._voidPortalDirty) {
+      for (const p of this.worlds.portals) {
+        this._renderSinglePortal(p, this.voidPortalRTs[p.index]);
+      }
+      this._voidPortalDirty = false;
+      this.worlds.setVisibleFloors(-1);
+      return;
+    }
+
+    let bestIdx = 0;
+    let bestD = Infinity;
+    for (const p of this.worlds.portals) {
+      const d = this.playerPos.distanceTo(p.voidPos);
+      if (d < bestD) { bestD = d; bestIdx = p.index; }
+    }
+    this._voidPortalCursor = (this._voidPortalCursor + 1) % (this.worlds.portals.length * 2);
+    const targetIdx = (this._voidPortalCursor & 1) === 0 ? bestIdx : (this._voidPortalCursor >> 1);
+    this._renderSinglePortal(this.worlds.portals[targetIdx], this.voidPortalRTs[targetIdx]);
+    this.worlds.setVisibleFloors(-1);
   }
 
   _animateLandmarks(t) {
@@ -1304,7 +1379,7 @@ class VoidGame {
       this.worlds.floatingOctahedron.rotation.y = t * 0.22;
     }
     if (this.worlds.bioCrystal) {
-      this.worlds.bioCrystal.position.y = 2.8 + Math.sin(t * 2.2) * 0.35;
+      this.worlds.bioCrystal.position.y = 2.85 + Math.sin(t * 2.2) * 0.14;
       this.worlds.bioCrystal.rotation.y = t * 1.4;
     }
     this.worlds.vtols.forEach((v, idx) => {
@@ -1326,6 +1401,9 @@ class VoidGame {
     const dt = Math.min(0.05, Math.max(0.001, this.clock.getDelta()));
     this.elapsedTime += dt;
     this._animateLandmarks(this.elapsedTime);
+    this.portalFlash = Math.max(0, this.portalFlash - dt * 1.6);
+    this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.2);
+    this.healPulse = Math.max(0, this.healPulse - dt * 1.8);
 
     if (this.isLocked) {
       this.timeSinceDamaged += dt;
@@ -1377,6 +1455,7 @@ class VoidGame {
       this.reloadTimer, this.katanaSlashAnim, this.muzzleFlashTimer
     );
 
+    const curFloorIdx = this.getFloorIndex();
     const curFloorNum = this.getSectorNumber();
     const floorEnemies = this.enemies.filter((e) => e.sector === curFloorNum);
     const activeBoss = floorEnemies.find((e) => e.kind === ENEMY_KIND.KATANA_BOSS) || null;
@@ -1389,9 +1468,42 @@ class VoidGame {
       paused: !this.isLocked
     });
 
-    if (this.inSkyTower) this.worlds.updateSunShadow(this.getFloorIndex() * FLOOR_HEIGHT, this.playerPos);
+    if (this.inSkyTower) {
+      this.worlds.updateSunShadow(curFloorIdx * FLOOR_HEIGHT, this.playerPos);
+    }
+    this.worlds.updateActiveFloorVisuals(this.inSkyTower ? curFloorIdx : -1, this.elapsedTime, this.playerPos.y);
     this._renderPortalPreview();
-    this.composer.render();
+
+    let sunLight = this.worlds.voidMoon;
+    let rayDensity = 0.085;
+    let isIndoorFloor = false;
+    if (this.inSkyTower) {
+      sunLight = this.worlds.skySun;
+      const theme = SKYTOWER_FLOORS[curFloorIdx]?.theme;
+      const atmos = FLOOR_ATMOS[theme] || FLOOR_ATMOS.panoramic_sky_lounge;
+      isIndoorFloor = atmos.indoor;
+      rayDensity = atmos.rayDensity;
+      this._rayColorVec.set(atmos.rayRGB[0], atmos.rayRGB[1], atmos.rayRGB[2]);
+      if (this.worlds.skyScene.fog) {
+        this.worlds.skyScene.fog.color.setHex(atmos.fogHex);
+        this.worlds.skyScene.fog.density = atmos.fogDensity;
+      }
+    } else {
+      rayDensity = 0.085;
+      this._rayColorVec.set(1.0, 0.72, 0.48);
+    }
+
+    this.postfx.render({
+      worldScene: this.inSkyTower ? this.worlds.skyScene : this.worlds.voidScene,
+      worldCamera: this.camera,
+      weaponScene: this.weaponRig.scene,
+      weaponCamera: this.weaponRig.camera,
+      sunLight,
+      rayColor: this._rayColorVec,
+      rayDensity,
+      isIndoorFloor,
+      time: this.elapsedTime
+    });
 
     this.hud.update({
       inSkyTower: this.inSkyTower,
