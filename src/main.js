@@ -43,30 +43,13 @@ class VoidGame {
     this.renderer.autoClear = false;
     this.container.appendChild(this.renderer.domElement);
 
-    // Live See-Through Portal RenderTargets (512x768 for Sky Tower, 320x480 per-portal on Void Planet)
-    this.portalRT = new THREE.WebGLRenderTarget(512, 768, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      type: THREE.HalfFloatType
-    });
-    this.voidPortalRTs = Array.from({ length: 5 }, () => new THREE.WebGLRenderTarget(320, 480, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      type: THREE.HalfFloatType
-    }));
-    this._voidPortalCursor = 0;
-    this._voidPortalDirty = true;
-    this._lastRealmSky = true;
-    this.portalCamera = new THREE.PerspectiveCamera(75, 512 / 768, 0.1, 860);
-    this.portalCamera.rotation.order = 'YXZ';
-
     // Main FPS Camera
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.08, 960);
     this.camera.rotation.order = 'YXZ';
 
     this.audio = new SoundSynth();
     this.mats  = new MaterialLibrary(this.renderer);
-    this.worlds = new WorldBuilder(this.mats, this.portalRT.texture, this.voidPortalRTs.map((rt) => rt.texture));
+    this.worlds = new WorldBuilder(this.mats);
     this.weaponRig = new WeaponRig(this.mats);
     this.hud = new HUDController();
 
@@ -229,6 +212,8 @@ class VoidGame {
 
     this.portalCooldown = 1.0;
     this.portalFlash = 0.0;
+    this.returnFloorIndex = startFloorIdx;
+    this.voidReturnTimer = 0;
     this.hurtFlash = 0;
     this.healPulse = 0;
     this.hitMarkerTimer = 0;
@@ -886,30 +871,12 @@ class VoidGame {
     }
   }
 
-  // --- Portals, Elevator & Stair Prompts ---
+  // --- Elevator & Stair Prompts ---
   _checkPortalsAndTransit() {
     this.portalHint = '';
 
-    // 1. Check Dimensional Portals
-    for (const p of this.worlds.portals) {
-      const pPos = this.inSkyTower ? p.skyPos : p.voidPos;
-      const dist = Math.hypot(this.playerPos.x - pPos.x, this.playerPos.z - pPos.z);
-      const dy = Math.abs(this.playerPos.y - pPos.y);
-      const open = this.floorUnlocked[p.floorIndex];
-
-      if (dist < 4.6 && dy < 2.5) {
-        this.portalHint = open
-          ? `STEP INTO THRESHOLD \u2192 ${this.inSkyTower ? 'VOID.PLANET SANCTUARY' : `SKY.TOWER ${p.label}`}`
-          : `LOCKED // REACH & UNLOCK ${p.label} FIRST`;
-      }
-      if (open && this.portalCooldown <= 0 && dist < 1.48 && dy < 2.3) {
-        this._warpThroughPortal(p);
-        return;
-      }
-    }
-
-    // 2. Check Elevator & Stair Prompts when inside Sky Tower
-    if (this.inSkyTower && !this.portalHint) {
+    // Check Elevator & Stair Prompts when inside Sky Tower
+    if (this.inSkyTower) {
       const curFIdx = this.getFloorIndex();
       const nextOpen = curFIdx < TOTAL_FLOORS - 1 ? this.floorUnlocked[curFIdx + 1] : false;
 
@@ -934,44 +901,55 @@ class VoidGame {
     }
   }
 
-  _warpThroughPortal(p) {
-    this.portalCooldown = 1.35;
+  _teleportToVoidPlanet() {
+    this.returnFloorIndex = this.getFloorIndex();
+    this.voidReturnTimer = 0;
+    this.portalCooldown = 1.5;
     this.portalFlash = 1.0;
     this.playerVel.set(0, 0, 0);
     this._clearTransientFX();
     this.audio.play('portal');
 
-    if (this.inSkyTower) {
-      this.inSkyTower = false;
-      this.playerPos.copy(p.voidSpawn);
-      const toWell = this.worlds.bioWellPos.clone().sub(this.playerPos);
-      this.playerYaw = Math.atan2(-toWell.x, -toWell.z);
-      this.playerPitch = -0.04;
-      this.showBanner('REALITY // VOID.PLANET — STEP IN EMERALD BIO-WELL TO HEAL', 5.0);
-    } else {
-      this.inSkyTower = true;
-      this.playerPos.copy(p.skySpawn);
-      this.playerYaw = 0;
-      this.playerPitch = 0;
-      this.elevatorY = p.floorIndex * FLOOR_HEIGHT;
-      this.elevatorTargetFloor = p.floorIndex;
-      this.worlds.updateElevatorVisuals(this.elevatorY, 1.0);
-      this._spawnFloorWave(p.floorIndex);
-      this.showBanner(`CONSTRUCT // RE-ENTERED SKY.TOWER ${p.label}`, 3.8);
-    }
+    this.inSkyTower = false;
+    this.playerPos.set(0, 0, -24.0);
+    const toWell = this.worlds.bioWellPos.clone().sub(this.playerPos);
+    this.playerYaw = Math.atan2(-toWell.x, -toWell.z);
+    this.playerPitch = -0.04;
+    this.showBanner('EMERGENCY TELEPORT // VOID.PLANET — STEP IN EMERALD BIO-WELL TO HEAL', 6.0);
+  }
+
+  _teleportToSkyTower(floorIdx) {
+    const targetIdx = Math.max(0, Math.min(TOTAL_FLOORS - 1, floorIdx));
+    const floorInfo = SKYTOWER_FLOORS[targetIdx];
+    this.voidReturnTimer = 0;
+    this.portalCooldown = 1.5;
+    this.portalFlash = 1.0;
+    this.playerVel.set(0, 0, 0);
+    this._clearTransientFX();
+    this.audio.play('portal');
+
+    this.inSkyTower = true;
+    this.playerPos.set(0, targetIdx * FLOOR_HEIGHT, 10.2);
+    this.playerYaw = 0;
+    this.playerPitch = 0;
+    this.elevatorY = targetIdx * FLOOR_HEIGHT;
+    this.elevatorTargetFloor = targetIdx;
+    this.worlds.updateElevatorVisuals(this.elevatorY, 1.0);
+    this._spawnFloorWave(targetIdx);
+    this.showBanner(`TELEPORT COMPLETE // RETURNED TO SKY.TOWER LVL.${String(floorInfo.level).padStart(2, '0')} ${floorInfo.name}`, 4.2);
   }
 
   _stepVoidSanctuary(dt) {
     if (this.health < this.maxHealth) {
-      this.health = Math.min(this.maxHealth, this.health + 9.0 * dt);
+      this.health = Math.min(this.maxHealth, this.health + 2.0 * dt);
     }
     const dWell = Math.hypot(this.playerPos.x - this.worlds.bioWellPos.x, this.playerPos.z - this.worlds.bioWellPos.z);
     if (dWell <= 5.2) {
-      const needVitals = this.health < this.maxHealth - 0.2 || this.shield < this.maxShield - 0.2;
+      const needVitals = this.health < this.maxHealth - 0.1 || this.shield < this.maxShield - 0.1;
       const needAmmo = this.pulseMag < this.pulseMagMax || this.railMag < this.railMagMax || this.railReserve < this.railReserveMax;
       if (needVitals || needAmmo) {
-        this.health = Math.min(this.maxHealth, this.health + 45 * dt);
-        this.shield = Math.min(this.maxShield, this.shield + 40 * dt);
+        this.health = Math.min(this.maxHealth, this.health + 8.0 * dt);
+        this.shield = Math.min(this.maxShield, this.shield + 6.0 * dt);
         this.pulseMag = this.pulseMagMax;
         this.railMag = this.railMagMax;
         this.railReserve = this.railReserveMax;
@@ -986,6 +964,22 @@ class VoidGame {
         this.railMag = this.railMagMax;
         this.railReserve = this.railReserveMax;
       }
+    }
+
+    const fullyHealed = this.health >= this.maxHealth - 0.1 && this.shield >= this.maxShield - 0.1;
+    if (fullyHealed) {
+      if (this.voidReturnTimer <= 0) {
+        this.voidReturnTimer = 1.5;
+      } else {
+        this.voidReturnTimer -= dt;
+        const lvl = String(this.returnFloorIndex + 1).padStart(2, '0');
+        this.portalHint = `VITALS RESTORED // TELEPORTING TO SKY.TOWER LVL.${lvl} IN ${Math.max(0.1, this.voidReturnTimer).toFixed(1)}S`;
+        if (this.voidReturnTimer <= 0) {
+          this._teleportToSkyTower(this.returnFloorIndex);
+        }
+      }
+    } else {
+      this.voidReturnTimer = 0;
     }
   }
 
@@ -1175,23 +1169,17 @@ class VoidGame {
     }
     if (rem > 0) this.health -= rem;
 
-    if (this.health > 0 && this.health <= 38 && this.bannerTimer <= 0.4) {
-      this.showBanner('CRITICAL DAMAGE // ENTER PORTAL TO VOID.PLANET TO HEAL!', 4.5);
+    if (this.health > 25 && this.health <= 40 && this.bannerTimer <= 0.4) {
+      this.showBanner('CRITICAL DAMAGE // TELEPORTER ARMED — LOW HEALTH EXTRACTION IMMINENT', 4.0);
     }
 
-    if (this.health <= 0) {
-      this.health = 28;
+    if (this.inSkyTower && this.health <= 25) {
+      this.health = Math.max(15, this.health);
       this.shield = 0;
       const boss = this.enemies.find((e) => e.kind === ENEMY_KIND.KATANA_BOSS);
       if (boss) boss.health = Math.min(boss.maxHealth, boss.health + 180);
 
-      // Warp player to the highest unlocked portal
-      let bestPortal = this.worlds.portals[0];
-      for (const p of this.worlds.portals) {
-        if (this.floorUnlocked[p.floorIndex]) bestPortal = p;
-      }
-      this._warpThroughPortal(bestPortal);
-      this.showBanner('EMERGENCY CONSTRUCT EJECTION // HEAL AT EMERALD BIO-WELL!', 6.0);
+      this._teleportToVoidPlanet();
     }
   }
 
@@ -1276,100 +1264,6 @@ class VoidGame {
     for (const sp of this.sparks) sp.scene.remove(sp.mesh);
     this.projectiles = [];
     this.sparks = [];
-  }
-
-  // --- Live See-Through Portal Render Pass ---
-  _renderSinglePortal(p, targetRT) {
-    const srcPos = this.inSkyTower ? p.skyPos : p.voidPos;
-    const dstPos = this.inSkyTower ? p.voidPos : p.skyPos;
-    const srcFront = this.inSkyTower ? p.skySpawn : p.voidSpawn;
-    const dstFront = this.inSkyTower ? p.voidSpawn : p.skySpawn;
-
-    const srcFrontYaw = Math.atan2(-(srcFront.x - srcPos.x), -(srcFront.z - srcPos.z));
-    const dstFrontYaw = Math.atan2(-(dstFront.x - dstPos.x), -(dstFront.z - dstPos.z));
-    const yawDiff = dstFrontYaw - (srcFrontYaw + Math.PI);
-
-    const outDir = new THREE.Vector3(dstFront.x - dstPos.x, 0, dstFront.z - dstPos.z).normalize();
-    this.portalCamera.position.copy(dstPos).add(new THREE.Vector3(0, 1.75, 0)).addScaledVector(outDir, 0.8);
-
-    if (this.inSkyTower) {
-      // Aim cleanly toward the elevated Emerald Bio-Well & Void Sanctuary horizon with gentle player parallax
-      const wellFocus = this.worlds.bioWellPos.clone().add(new THREE.Vector3(0, 2.2, 0));
-      const toWell = wellFocus.sub(this.portalCamera.position);
-      const wellYaw = Math.atan2(-toWell.x, -toWell.z);
-      const wellPitch = Math.atan2(toWell.y, Math.hypot(toWell.x, toWell.z));
-      const relYaw = Math.atan2(Math.sin(this.playerYaw + yawDiff - wellYaw), Math.cos(this.playerYaw + yawDiff - wellYaw));
-      this.portalCamera.rotation.set(wellPitch + this.playerPitch * 0.35, wellYaw + relYaw * 0.32, 0);
-    } else {
-      // Aim inward toward the center of the destination Sky Tower floor so all 5 portals show distinct levels
-      const floorFocus = new THREE.Vector3(0, p.floorIndex * FLOOR_HEIGHT + 2.2, -3.5);
-      const toFloor = floorFocus.sub(this.portalCamera.position);
-      const floorYaw = Math.atan2(-toFloor.x, -toFloor.z);
-      const floorPitch = Math.atan2(toFloor.y, Math.hypot(toFloor.x, toFloor.z));
-      const relYaw = Math.atan2(Math.sin(this.playerYaw + yawDiff - floorYaw), Math.cos(this.playerYaw + yawDiff - floorYaw));
-      this.portalCamera.rotation.set(floorPitch + this.playerPitch * 0.35, floorYaw + relYaw * 0.30, 0);
-    }
-
-    const destScene = this.inSkyTower ? this.worlds.voidScene : this.worlds.skyScene;
-    const dstArch = this.inSkyTower ? p.voidGroup : p.skyGroup;
-    if (dstArch) dstArch.visible = false;
-    if (!this.inSkyTower) {
-      this.worlds.setVisibleFloors(p.floorIndex);
-      this.worlds.updateSunShadow(p.floorIndex * FLOOR_HEIGHT, p.skyPos);
-      const pTheme = SKYTOWER_FLOORS[p.floorIndex]?.theme;
-      const pa = FLOOR_ATMOS[pTheme];
-      if (pa && this.worlds.skyScene.fog) {
-        this.worlds.skyScene.fog.color.setHex(pa.fogHex);
-        this.worlds.skyScene.fog.density = pa.fogDensity;
-      }
-    }
-    this.renderer.setRenderTarget(targetRT);
-    this.renderer.clear();
-    this.renderer.render(destScene, this.portalCamera);
-    this.renderer.setRenderTarget(null);
-    if (dstArch) dstArch.visible = true;
-  }
-
-  _renderPortalPreview() {
-    if (this._lastRealmSky !== this.inSkyTower) {
-      this._lastRealmSky = this.inSkyTower;
-      if (!this.inSkyTower) this._voidPortalDirty = true;
-    }
-
-    if (this.inSkyTower) {
-      let bestP = null;
-      let bestD = Infinity;
-      for (const p of this.worlds.portals) {
-        if (!this.floorUnlocked[p.floorIndex]) continue;
-        if (Math.abs(this.playerPos.y - p.skyPos.y) > FLOOR_HEIGHT * 1.25) continue;
-        const d = this.playerPos.distanceTo(p.skyPos);
-        if (d < bestD) { bestD = d; bestP = p; }
-      }
-      if (!bestP || bestD > 55) return;
-      this._renderSinglePortal(bestP, this.portalRT);
-      return;
-    }
-
-    // Void Planet: warm all 5 distinct portal previews on entry, then refresh 1 portal per frame (closest every other frame)
-    if (this._voidPortalDirty) {
-      for (const p of this.worlds.portals) {
-        this._renderSinglePortal(p, this.voidPortalRTs[p.index]);
-      }
-      this._voidPortalDirty = false;
-      this.worlds.setVisibleFloors(-1);
-      return;
-    }
-
-    let bestIdx = 0;
-    let bestD = Infinity;
-    for (const p of this.worlds.portals) {
-      const d = this.playerPos.distanceTo(p.voidPos);
-      if (d < bestD) { bestD = d; bestIdx = p.index; }
-    }
-    this._voidPortalCursor = (this._voidPortalCursor + 1) % (this.worlds.portals.length * 2);
-    const targetIdx = (this._voidPortalCursor & 1) === 0 ? bestIdx : (this._voidPortalCursor >> 1);
-    this._renderSinglePortal(this.worlds.portals[targetIdx], this.voidPortalRTs[targetIdx]);
-    this.worlds.setVisibleFloors(-1);
   }
 
   _animateLandmarks(t) {
@@ -1472,7 +1366,6 @@ class VoidGame {
       this.worlds.updateSunShadow(curFloorIdx * FLOOR_HEIGHT, this.playerPos);
     }
     this.worlds.updateActiveFloorVisuals(this.inSkyTower ? curFloorIdx : -1, this.elapsedTime, this.playerPos.y);
-    this._renderPortalPreview();
 
     let sunLight = this.worlds.voidMoon;
     let rayDensity = 0.085;
@@ -1537,7 +1430,6 @@ class VoidGame {
       hitMarkerCrit: this.hitMarkerCrit,
       playerPos: this.playerPos,
       playerYaw: this.playerYaw,
-      portals: this.worlds.portals,
       floorUnlocked: this.floorUnlocked,
       elevatorCenter: this.worlds.elevatorCenter,
       bioWellPos: this.worlds.bioWellPos

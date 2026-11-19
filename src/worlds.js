@@ -158,10 +158,8 @@ export const SKYTOWER_FLOORS = [
 ];
 
 export class WorldBuilder {
-  constructor(mats, portalRenderTexture, voidPortalTextures = null) {
+  constructor(mats) {
     this.mats = mats;
-    this.portalTex = portalRenderTexture;
-    this.voidPortalTexs = voidPortalTextures;
 
     this.skyScene = new THREE.Scene();
     this.voidScene = new THREE.Scene();
@@ -202,37 +200,6 @@ export class WorldBuilder {
       new THREE.Vector3( 9.5, 0, -8.0)
     ];
 
-    // 5 Dimensional Threshold Portals linking key Sky Tower levels with the Void Planet Sanctuary
-    const portalFloors = [0, 3, 7, 11, 15]; // Floors 1, 4, 8, 12, 16
-    const voidArcX = [-16.0, -8.2, 0.0, 8.2, 16.0];
-    const voidArcZ = [-28.0, -31.5, -33.5, -31.5, -28.0];
-    const voidYaws = [0.42, 0.22, 0.0, -0.22, -0.42];
-
-    this.portals = portalFloors.map((fIdx, pIdx) => {
-      const f = SKYTOWER_FLOORS[fIdx];
-      const y0 = fIdx * FLOOR_HEIGHT;
-      const side = f.portalSide || -1;
-      return {
-        index: pIdx,
-        floorIndex: fIdx,
-        label: `P-0${pIdx + 1} // LVL.${String(f.level).padStart(2, '0')} ${f.name}`,
-        skyPos: new THREE.Vector3(side * 12.6, y0, 12.2),
-        skyYaw: side < 0 ? -0.95 : 0.95,
-        skySpawn: new THREE.Vector3(side * 9.5, y0, 10.2),
-        voidPos: new THREE.Vector3(voidArcX[pIdx], 0, voidArcZ[pIdx]),
-        voidYaw: voidYaws[pIdx],
-        voidSpawn: new THREE.Vector3(voidArcX[pIdx] * 0.85, 0, voidArcZ[pIdx] + 3.6),
-        color: f.accent,
-        cssColor: f.cssColor,
-        skyApertureMat: null,
-        voidApertureMat: null,
-        skyGroup: null,
-        voidGroup: null,
-        skyLight: null,
-        voidLight: null
-      };
-    });
-
     this._buildSkyTower();
     this._buildVoidPlanet();
     const initUnlocked = new Array(TOTAL_FLOORS).fill(false);
@@ -241,14 +208,6 @@ export class WorldBuilder {
   }
 
   updateUnlocks(floorUnlocked) {
-    for (const p of this.portals) {
-      const open = Boolean(floorUnlocked[p.floorIndex]);
-      const val = open ? 1.0 : 0.0;
-      if (p.skyApertureMat) p.skyApertureMat.uniforms.uUnlocked.value = val;
-      if (p.voidApertureMat) p.voidApertureMat.uniforms.uUnlocked.value = val;
-      if (p.skyLight) p.skyLight.intensity = open ? 3.8 : 0.8;
-      if (p.voidLight) p.voidLight.intensity = open ? 5.5 : 1.0;
-    }
     // Stairway gates on floor i unlock when floor i+1 is unlocked;
     // Elevator doorway gates open when either the floor itself or the next floor is unlocked so players can exit the cab onto the new level
     for (let i = 0; i < TOTAL_FLOORS - 1; i++) {
@@ -322,66 +281,6 @@ export class WorldBuilder {
 
   _addRamp(xMin, xMax, zLow, zHigh, yLow, yHigh) {
     this.skyRamps.push({ xMin, xMax, zLow, zHigh, yLow, yHigh });
-  }
-
-  _addPortalArch(scene, colliders, pos, yaw, neonHex, portalTexOverride = null) {
-    const group = new THREE.Group();
-    group.position.copy(pos);
-    group.rotation.y = yaw;
-    scene.add(group);
-
-    const tiMat = this.mats.getPBR('portal_ti', 'dark_titanium', {
-      color: 0xe6edf8, hasMetallic: true, roughness: 0.68, clearcoat: 0.30, envMapIntensity: 2.35, normalScale: 1.2
-    });
-    const neonMat = this.mats.getEmissive(`portal_neon_${neonHex}`, neonHex, 1.12);
-
-    const addPart = (lp, sz, mat, glow = false, chamfer = 0.04) => {
-      const geom = chamfer > 0
-        ? this.mats.makeChamferBoxGeometry(sz[0], sz[1], sz[2], chamfer, 2, 2.0)
-        : this.mats.makeWorldBoxGeometry(sz[0], sz[1], sz[2], 2.0);
-      const m = new THREE.Mesh(geom, mat);
-      m.position.set(lp[0], lp[1], lp[2]);
-      m.castShadow = !glow;
-      m.receiveShadow = !glow;
-      group.add(m);
-    };
-
-    // Raised obsidian dais & grounded wide concrete base plinth + chamfered monolithic pillars
-    addPart([0, 0.04, 0], [5.45, 0.08, 3.05], tiMat, false, 0.02);
-    addPart([0, 0.14, 0], [4.8, 0.20, 2.4], tiMat, false, 0.04);
-    addPart([-1.68, 2.35, 0], [0.56, 4.5, 0.76], tiMat, false, 0.06);
-    addPart([ 1.68, 2.35, 0], [0.56, 4.5, 0.76], tiMat, false, 0.06);
-    addPart([ 0.00, 4.48, 0], [3.92, 0.58, 0.82], tiMat, false, 0.06);
-
-    // Inner blazing neon rim
-    addPart([-1.32, 2.25, 0], [0.14, 3.96, 0.44], neonMat, true, 0.02);
-    addPart([ 1.32, 2.25, 0], [0.14, 3.96, 0.44], neonMat, true, 0.02);
-    addPart([ 0.00, 4.14, 0], [2.78, 0.14, 0.44], neonMat, true, 0.02);
-    addPart([ 0.00, 0.24, 0], [2.78, 0.10, 0.48], neonMat, true, 0.02);
-
-    // Live See-Through Dimensional Aperture Plane
-    const apMat = this.mats.createPortalApertureMaterial(portalTexOverride || this.portalTex, neonHex);
-    const apMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.50, 3.80), apMat);
-    apMesh.position.set(0, 2.18, 0);
-    apMesh.userData.noDepthPrepass = true;
-    group.add(apMesh);
-
-    const light = new THREE.PointLight(neonHex, 3.8, 8.5, 1.5);
-    light.position.set(0, 2.3, 0);
-    group.add(light);
-
-    // Side pillar colliders so player walks cleanly through center opening
-    const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
-    for (const side of [-1.68, 1.68]) {
-      const wx = pos.x + side * cosY;
-      const wz = pos.z - side * sinY;
-      colliders.push(new THREE.Box3(
-        new THREE.Vector3(wx - 0.45, pos.y, wz - 0.45),
-        new THREE.Vector3(wx + 0.45, pos.y + 4.5, wz + 0.45)
-      ));
-    }
-
-    return { apertureMat: apMat, light, group };
   }
 
   // =========================================================================
@@ -484,14 +383,6 @@ export class WorldBuilder {
 
     // Build the Continuous Vertical Central Elevator Shaft & Interactive Glass Cab
     this._buildElevatorSystem(s, palette);
-
-    // Portals in Sky Tower (placed on key floors 1, 4, 8, 12, 16)
-    for (const p of this.portals) {
-      const res = this._addPortalArch(this.floorGroups[p.floorIndex], this.skyColliders, p.skyPos, p.skyYaw, p.color);
-      p.skyApertureMat = res.apertureMat;
-      p.skyLight = res.light;
-      p.skyGroup = res.group;
-    }
 
     // Surrounding Mega City Skyline + Twin-Ring Spire + Patrol VTOLs (clean architectural cladding, no giant vent textures)
     this._addBox(s, null, [64, 95, -235], [18, 420, 18], mWhiteTile, { collide: false, rot: [0, 0.26, 0], tileMeters: 16 });
@@ -1258,15 +1149,6 @@ export class WorldBuilder {
     // Atmospheric drifting mist spores / volcanic embers on Void Planet
     this.voidDustPoints = this._createDustParticles(520, [54, 16, 68], [0, 7.5, -10], 0x8ef2d8, 0.048);
     v.add(this.voidDustPoints);
-
-    // Portals on Void Planet (each portal receives its own Sky Tower floor render target)
-    for (const p of this.portals) {
-      const pTex = this.voidPortalTexs?.[p.index] || this.portalTex;
-      const res = this._addPortalArch(v, this.voidColliders, p.voidPos, p.voidYaw, p.color, pTex);
-      p.voidApertureMat = res.apertureMat;
-      p.voidLight = res.light;
-      p.voidGroup = res.group;
-    }
 
     // --- COLOSSAL HORIZON MEGASTRUCTURES (voidplanet/) ---
     const wedgeGrp = new THREE.Group();

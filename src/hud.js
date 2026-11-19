@@ -67,7 +67,7 @@ export class HUDController {
       enemies, totalKills, victory, activeBoss,
       bannerText, bannerTimer, portalHint,
       hurtFlash, healPulse, portalFlash, hitMarkerTimer, hitMarkerCrit,
-      playerPos, playerYaw, portals, floorUnlocked, elevatorCenter, bioWellPos
+      playerPos, playerYaw, floorUnlocked, elevatorCenter, bioWellPos
     } = state;
 
     // 1. Fullscreen Atmospheric Vignettes
@@ -108,9 +108,9 @@ export class HUDController {
       if (victory) {
         this.objText.textContent = `ALL 16 FLOORS LIBERATED // ELIMINATED: ${String(totalKills).padStart(2, '0')}`;
       } else if (!inSkyTower) {
-        this.objText.textContent = health < 99.5
+        this.objText.textContent = (health < maxHealth - 0.1 || shield < maxShield - 0.1)
           ? 'SANCTUARY // STEP IN EMERALD BIO-WELL TO HEAL'
-          : 'VITALS OPTIMAL // ENTER PORTAL TO RESUME COMBAT';
+          : 'VITALS OPTIMAL // TELEPORTING BACK TO SKY.TOWER...';
       } else if (enemies.length === 0) {
         this.objText.textContent = `LVL.${String(sectorNum).padStart(2, '0')} CLEAR // TAKE ELEVATOR [E] OR STAIRS UP \u2192 LVL.${String(Math.min(16, sectorNum + 1)).padStart(2, '0')}`;
       } else {
@@ -176,10 +176,10 @@ export class HUDController {
     }
 
     // 7. Tactical Radar Canvas
-    this._drawRadar(playerPos, playerYaw, inSkyTower, sectorNum, portals, floorUnlocked, elevatorCenter, bioWellPos, enemies);
+    this._drawRadar(playerPos, playerYaw, inSkyTower, sectorNum, floorUnlocked, elevatorCenter, bioWellPos, enemies);
   }
 
-  _drawRadar(playerPos, playerYaw, inSkyTower, sectorNum, portals, floorUnlocked, elevatorCenter, bioWellPos, enemies) {
+  _drawRadar(playerPos, playerYaw, inSkyTower, sectorNum, floorUnlocked, elevatorCenter, bioWellPos, enemies) {
     const ctx = this.radarCtx;
     const w = this.radarCanvas.width;
     const h = this.radarCanvas.height;
@@ -235,13 +235,6 @@ export class HUDController {
         ctx.fillRect(cx + px - sz * 0.5, cy + py - sz * 0.5, sz, sz);
       }
     };
-
-    for (const p of portals) {
-      if (!floorUnlocked?.[p.floorIndex]) continue;
-      if (inSkyTower && p.floorIndex + 1 !== sectorNum) continue;
-      const wp = inSkyTower ? p.skyPos : p.voidPos;
-      plot(wp.x, wp.z, p.cssColor, 11, true);
-    }
 
     if (!inSkyTower) {
       plot(bioWellPos.x, bioWellPos.z, '#24f5a8', 13, false);
